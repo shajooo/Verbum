@@ -1,0 +1,25 @@
+{
+  "hotkey": [
+    "ctrl",
+    "space"
+  ],
+  "model": "small",
+  "language": "auto",
+  "device": "auto",
+  "compute_type": "auto",
+  "microphone": "default",
+  "auto_copy": true,
+  "auto_paste": false,
+  "sound_feedback": false,
+  "start_with_windows": false,
+  "image_path": "",
+  "voice_history": [],
+  "extraction_history": [],
+  "font_history": [],
+  "files_history": [],
+  "enable_extraction": true,
+  "enable_font": false,
+  "enable_files": false,
+  "sidebar_collapsed": true,
+  "recent_transcriptions": []
+}

@@ -1,0 +1,45 @@
+# ==============================================================================
+# Git Ignore for Voice Input
+# ==============================================================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Python virtual environments
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# PyInstaller & Build artifacts
+build/
+build-*/
+dist/
+release/
+release-*/
+*.spec.bak
+*.manifest
+
+# Logs and runtime outputs
+logs/
+*.log
+
+# Caches and test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.tmp/
+
+# Operating System & IDE junk
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*~
