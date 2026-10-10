@@ -1,0 +1,9 @@
+{
+  "project_id": "legacy_verified_dataset_b9e9810d",
+  "project_name": "Legacy verified dataset",
+  "created_at": "2026-10-07T17:45:00+00:00",
+  "schema_version": 1,
+  "legacy_read_only": true,
+  "legacy_dataset_root": "C:\\Projects\\Transcriber\\dataset\\glyphs",
+  "legacy_manifest": "C:\\Projects\\Transcriber\\metadata\\glyph_manifest.json"
+}

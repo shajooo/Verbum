@@ -11,17 +11,23 @@ Pages (via sidebar):
 """
 from __future__ import annotations
 
+import hashlib
+import uuid
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QPixmap
 from PySide6.QtWidgets import (
-    QButtonGroup, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
-    QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QToolButton,
+    QButtonGroup, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
+    QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
+    QProgressBar, QScrollArea, QSizePolicy, QStackedWidget, QToolButton,
     QVBoxLayout, QWidget,
 )
 
 from ..config import Config
+from ..document_model import DocumentPage, EditableDocument
+from ..font_projects import FontProjectStore
 from .icons import icon
 from .recording_overlay import RecordingVisualization
 
@@ -654,6 +660,8 @@ class CreateFontPage(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("pageWidget")
+        self._ttf_path: str = ""
+        self._otf_path: str = ""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
@@ -697,6 +705,16 @@ class CreateFontPage(QWidget):
         self.disabled_notice.setWordWrap(True)
         cl.addWidget(self.disabled_notice)
 
+        # Dataset summary badge
+        self.dataset_summary = QLabel("Dataset: 0 glyph samples")
+        self.dataset_summary.setObjectName("sectionSubtitle")
+        cl.addWidget(self.dataset_summary)
+
+        # Font ready badge
+        self.font_ready_badge = QLabel("Not generated")
+        self.font_ready_badge.setObjectName("hotkeyBadge")
+        cl.addWidget(self.font_ready_badge, 0, Qt.AlignmentFlag.AlignLeft)
+
         # Upload area
         upload_area = QFrame()
         upload_area.setObjectName("skeletonPanel")
@@ -716,6 +734,17 @@ class CreateFontPage(QWidget):
         ul.addWidget(ul_sub)
         ul.addWidget(self.upload_btn, 0, Qt.AlignmentFlag.AlignLeft)
         cl.addWidget(upload_area)
+
+        # Intake progress / status
+        self.intake_progress = QLabel("")
+        self.intake_progress.setObjectName("sectionSubtitle")
+        self.intake_progress.hide()
+        cl.addWidget(self.intake_progress)
+
+        self.intake_status = QLabel("")
+        self.intake_status.setObjectName("imageMeta")
+        self.intake_status.setWordWrap(True)
+        cl.addWidget(self.intake_status)
 
         # Preview area
         preview_area = QFrame()
@@ -798,25 +827,83 @@ class CreateFontPage(QWidget):
             row.copy_clicked.connect(copy_cb)
             self.history_rows.addWidget(row)
 
+    # ── Intake UI helpers (called by MainWindow) ──────────────────────────────
+
+    def show_intake_progress(self, message: str) -> None:
+        self.intake_progress.setText(f"⏳ {message}")
+        self.intake_progress.show()
+
+    def show_intake_result(self, result: dict[str, Any]) -> None:
+        self.intake_progress.hide()
+        candidates = result.get("candidates", [])
+        good = sum(1 for c in candidates if c.get("quality") == "GOOD")
+        if good:
+            self.intake_status.setText(f"✓ {good} glyph(s) extracted from this sample.")
+        else:
+            self.intake_status.setText("No usable glyphs were extracted from this sample.")
+
+    def show_intake_error(self, message: str) -> None:
+        self.intake_progress.hide()
+        self.intake_status.setText(f"⚠ {message}")
+
+    # ── Generation status UI helpers ─────────────────────────────────────────
+
+    def set_dataset_summary(self, count: int) -> None:
+        self.dataset_summary.setText(f"Dataset: {count} glyph samples")
+
+    def set_generation_badge(self, generation: dict[str, Any] | None) -> None:
+        if generation:
+            v = int(generation.get("version", 0))
+            self.font_ready_badge.setText(f"v{v:03d} Ready")
+            self.font_ready_badge.setStyleSheet("color: #60ddb0; border-color: #60ddb0;")
+            self._ttf_path = generation.get("ttf_path") or ""
+            self._otf_path = generation.get("otf_path") or ""
+        else:
+            self.font_ready_badge.setText("Not generated")
+            self.font_ready_badge.setStyleSheet("")
+            self._ttf_path = ""
+            self._otf_path = ""
+
 
 # ─── Page: Create Files ───────────────────────────────────────────────────────
 
 class CreateFilesPage(QWidget):
+    """Create Files page with font database selector and Open in Editor."""
     toggled = Signal(bool)
+    generate_pdf_requested = Signal(str, str, str, object)  # title, content, font_path, html_pages
+    cancel_pdf_requested = Signal()
+    download_pdf_requested = Signal()
+    open_pdf_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("pageWidget")
+        # ── Document / PDF state ─────────────────────────────────────────────
+        self._document: EditableDocument = EditableDocument()
+        self._document_session_id: str = str(uuid.uuid4())
+        self._page_editors: list[QPlainTextEdit] = []
+        self._pdf_path: str = ""
+        self._pdf_session_id: str = ""
+        self._pdf_fingerprint: str = ""
+        self._pdf_font_ref: dict[str, Any] = {}
+        self._pending_open_in_editor: bool = False
+        self._pending_open_session_id: str = ""
+        # ── Font project state ───────────────────────────────────────────────
+        self._font_project_store: FontProjectStore | None = None
+        self._font_projects: list[dict[str, Any]] = []
+        self._selected_font_path: str = ""
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
+        # ── Main creation card ───────────────────────────────────────────────
         card = QFrame()
         card.setObjectName("surfaceCard")
         card.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         cl = QVBoxLayout(card)
         cl.setContentsMargins(24, 21, 24, 22)
-        cl.setSpacing(18)
+        cl.setSpacing(16)
 
         # Heading
         head = QHBoxLayout()
@@ -826,7 +913,7 @@ class CreateFilesPage(QWidget):
         ht_col.setSpacing(2)
         ht = QLabel("Create Files")
         ht.setObjectName("sectionTitle")
-        hs = QLabel("Create files from extracted or generated content")
+        hs = QLabel("Generate handwritten PDF documents using your personalized font")
         hs.setObjectName("sectionSubtitle")
         ht_col.addWidget(ht)
         ht_col.addWidget(hs)
@@ -842,66 +929,155 @@ class CreateFilesPage(QWidget):
 
         # Disabled notice
         self.disabled_notice = QLabel(
-            "Enable Create Files to generate output files from your transcribed or extracted content.\n"
-            "The file generation backend will be implemented in a future release."
+            "Enable Create Files to generate handwritten PDF documents from your content.\n"
+            "Select a font project and version, type your content, then generate."
         )
         self.disabled_notice.setObjectName("disabledNotice")
         self.disabled_notice.setWordWrap(True)
         cl.addWidget(self.disabled_notice)
 
-        # Source panel
-        source_panel = QFrame()
-        source_panel.setObjectName("skeletonPanel")
-        sl = QVBoxLayout(source_panel)
-        sl.setContentsMargins(18, 16, 18, 16)
-        sl.setSpacing(8)
-        sp_title = QLabel("Choose source")
-        sp_title.setObjectName("panelLabel")
-        self.source_label = QLabel("Content will appear here once available.")
-        self.source_label.setObjectName("skeletonPlaceholder")
-        self.source_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.source_label.setMinimumHeight(52)
-        sl.addWidget(sp_title)
-        sl.addWidget(self.source_label)
-        cl.addWidget(source_panel)
+        # ── Font Database Selector ───────────────────────────────────────────
+        font_panel = QFrame()
+        font_panel.setObjectName("skeletonPanel")
+        fpl = QVBoxLayout(font_panel)
+        fpl.setContentsMargins(18, 14, 18, 14)
+        fpl.setSpacing(10)
 
-        # File type row
-        ft_row = QHBoxLayout()
-        ft_lbl = QLabel("File type:")
-        ft_lbl.setObjectName("sectionSubtitle")
-        self.file_type_label = QLabel("TXT")
-        self.file_type_label.setObjectName("hotkeyBadge")
-        ft_row.addWidget(ft_lbl)
-        ft_row.addWidget(self.file_type_label)
-        ft_row.addStretch()
-        cl.addLayout(ft_row)
+        fp_title = QLabel("Handwriting font database")
+        fp_title.setObjectName("panelLabel")
+        fpl.addWidget(fp_title)
 
-        # Preview panel
-        prev_panel = QFrame()
-        prev_panel.setObjectName("skeletonPanel")
-        pvl = QVBoxLayout(prev_panel)
-        pvl.setContentsMargins(18, 16, 18, 16)
-        pvl.setSpacing(8)
-        pv_title = QLabel("Output preview")
-        pv_title.setObjectName("panelLabel")
-        self.preview_label = QLabel("Generated file preview will appear here.")
-        self.preview_label.setObjectName("skeletonPlaceholder")
-        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setMinimumHeight(64)
-        pvl.addWidget(pv_title)
-        pvl.addWidget(self.preview_label)
-        cl.addWidget(prev_panel)
+        fp_row = QHBoxLayout()
+        fp_row.setSpacing(10)
+        fp_proj_lbl = QLabel("Project:")
+        fp_proj_lbl.setObjectName("sectionSubtitle")
+        fp_proj_lbl.setFixedWidth(54)
+        self.font_database_combo = QComboBox()
+        self.font_database_combo.setObjectName("fontDatabaseCombo")
+        self.font_database_combo.setMinimumWidth(220)
+        self.font_database_combo.setToolTip("Select which handwriting font project to use")
+        self.font_database_combo.currentIndexChanged.connect(self._on_font_project_changed)
+        fp_row.addWidget(fp_proj_lbl)
+        fp_row.addWidget(self.font_database_combo, 1)
+        fpl.addLayout(fp_row)
 
-        # Download
-        self.download_btn = QPushButton("Download file")
-        self.download_btn.setObjectName("primaryButton")
-        self.download_btn.setIcon(icon("download", "#f3f1ff", 16))
+        fv_row = QHBoxLayout()
+        fv_row.setSpacing(10)
+        fv_lbl = QLabel("Version:")
+        fv_lbl.setObjectName("sectionSubtitle")
+        fv_lbl.setFixedWidth(54)
+        self.font_version_combo = QComboBox()
+        self.font_version_combo.setObjectName("fontVersionCombo")
+        self.font_version_combo.setMinimumWidth(220)
+        self.font_version_combo.setToolTip("Select the generated font version to use")
+        self.font_version_combo.currentIndexChanged.connect(self._on_font_version_changed)
+        fv_row.addWidget(fv_lbl)
+        fv_row.addWidget(self.font_version_combo, 1)
+        fpl.addLayout(fv_row)
+
+        self.font_preview_label = QLabel("Select a font project and version to use.")
+        self.font_preview_label.setObjectName("skeletonPlaceholder")
+        self.font_preview_label.setWordWrap(True)
+        fpl.addWidget(self.font_preview_label)
+        cl.addWidget(font_panel)
+
+        # ── Document input ───────────────────────────────────────────────────
+        doc_panel = QFrame()
+        doc_panel.setObjectName("skeletonPanel")
+        dpl = QVBoxLayout(doc_panel)
+        dpl.setContentsMargins(18, 14, 18, 14)
+        dpl.setSpacing(8)
+
+        dp_head = QHBoxLayout()
+        dp_title = QLabel("Document content")
+        dp_title.setObjectName("panelLabel")
+        dp_head.addWidget(dp_title)
+        dp_head.addStretch()
+        self.page_count_label = QLabel("1 page")
+        self.page_count_label.setObjectName("hotkeyBadge")
+        dp_head.addWidget(self.page_count_label)
+        dpl.addLayout(dp_head)
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        title_lbl = QLabel("Title:")
+        title_lbl.setObjectName("sectionSubtitle")
+        title_lbl.setFixedWidth(38)
+        self.title_input = QLineEdit()
+        self.title_input.setObjectName("docTitleInput")
+        self.title_input.setPlaceholderText("Document title (optional)")
+        self.title_input.setMaxLength(120)
+        title_row.addWidget(title_lbl)
+        title_row.addWidget(self.title_input, 1)
+        dpl.addLayout(title_row)
+
+        self.content_input = QPlainTextEdit()
+        self.content_input.setObjectName("docContentInput")
+        self.content_input.setPlaceholderText(
+            "Type or paste the text to render in your handwriting font…"
+        )
+        self.content_input.setMinimumHeight(140)
+        self.content_input.setMaximumHeight(260)
+        dpl.addWidget(self.content_input)
+        cl.addWidget(doc_panel)
+
+        # ── Status and progress ──────────────────────────────────────────────
+        self.pdf_status_label = QLabel("")
+        self.pdf_status_label.setObjectName("sectionSubtitle")
+        self.pdf_status_label.setWordWrap(True)
+        self.pdf_status_label.hide()
+        cl.addWidget(self.pdf_status_label)
+
+        self.pdf_progress = QProgressBar()
+        self.pdf_progress.setObjectName("pdfProgress")
+        self.pdf_progress.setRange(0, 100)
+        self.pdf_progress.hide()
+        cl.addWidget(self.pdf_progress)
+
+        # ── Action buttons ───────────────────────────────────────────────────
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        self.generate_btn = QPushButton("Generate PDF")
+        self.generate_btn.setObjectName("primaryButton")
+        self.generate_btn.setIcon(icon("files", "#f3f1ff", 16))
+        self.generate_btn.setEnabled(False)
+        self.generate_btn.setToolTip("Generate a handwritten PDF document from this content")
+        self.generate_btn.clicked.connect(self._on_generate)
+        btn_row.addWidget(self.generate_btn)
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setObjectName("quietButton")
+        self.cancel_btn.hide()
+        self.cancel_btn.clicked.connect(self.cancel_pdf_requested)
+        btn_row.addWidget(self.cancel_btn)
+
+        self.download_btn = QPushButton("Download PDF")
+        self.download_btn.setObjectName("quietButton")
+        self.download_btn.setIcon(icon("download", "#b9b4e8", 16))
         self.download_btn.setEnabled(False)
-        self.download_btn.setToolTip("File generation backend is not yet implemented.")
-        cl.addWidget(self.download_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        self.download_btn.clicked.connect(self.download_pdf_requested)
+        btn_row.addWidget(self.download_btn)
+
+        self.open_viewer_btn = QPushButton("Open PDF")
+        self.open_viewer_btn.setObjectName("quietButton")
+        self.open_viewer_btn.setEnabled(False)
+        self.open_viewer_btn.clicked.connect(self.open_pdf_requested)
+        btn_row.addWidget(self.open_viewer_btn)
+
+        self.open_in_editor_btn = QPushButton("Open in Editor")
+        self.open_in_editor_btn.setObjectName("quietButton")
+        self.open_in_editor_btn.setEnabled(False)
+        self.open_in_editor_btn.setToolTip("Import current PDF into document editor")
+        self.open_in_editor_btn.clicked.connect(self.open_current_pdf_in_editor)
+        btn_row.addWidget(self.open_in_editor_btn)
+
+        btn_row.addStretch()
+        cl.addLayout(btn_row)
+
         layout.addWidget(card)
 
-        # History card
+        # ── History card ─────────────────────────────────────────────────────
         self.history_card = QFrame()
         self.history_card.setObjectName("surfaceCard")
         self.history_card.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -915,7 +1091,7 @@ class CreateFilesPage(QWidget):
         h_txt.setSpacing(2)
         h_t = QLabel("Files history")
         h_t.setObjectName("sectionTitle")
-        h_s = QLabel("Your generated files will appear here")
+        h_s = QLabel("Your generated PDF documents will appear here")
         h_s.setObjectName("sectionSubtitle")
         h_txt.addWidget(h_t)
         h_txt.addWidget(h_s)
@@ -934,8 +1110,223 @@ class CreateFilesPage(QWidget):
         layout.addStretch()
         self._refresh_enabled(False)
 
+    # ── Font project selector helpers ─────────────────────────────────────────
+
+    def _on_font_project_changed(self, index: int) -> None:
+        project_id = self.font_database_combo.itemData(index)
+        if project_id:
+            self._populate_font_versions(project_id)
+
+    def _on_font_version_changed(self, _index: int) -> None:
+        data = self.font_version_combo.currentData()
+        if data and isinstance(data, dict):
+            self._selected_font_path = data.get("path", "")
+            self.font_preview_label.setText(
+                f"✓ Using: {data.get('label', 'Selected font version')}"
+            )
+        else:
+            self._selected_font_path = ""
+        self._refresh_generate_btn()
+
+    def _populate_font_versions(self, project_id: str) -> None:
+        """Populate the version combo from one specific project's validated generations."""
+        self.font_version_combo.blockSignals(True)
+        self.font_version_combo.clear()
+
+        store = self._font_project_store
+        if store is None:
+            self.font_version_combo.addItem("(no font store)", None)
+            self.font_version_combo.setEnabled(False)
+            self.font_preview_label.setText("No valid generated fonts found in this project.")
+            self.font_version_combo.blockSignals(False)
+            return
+
+        history = store.generation_history(project_id)
+        valid_items = []
+        for record in history:
+            version = int(record.get("version", 0))
+            validated = store.validated_generation(project_id, version)
+            if validated and validated.get("ttf_path"):
+                label = f"v{version:03d} — {validated.get('glyph_count', 0)} glyphs"
+                valid_items.append({
+                    "label": label,
+                    "project_id": project_id,
+                    "version": version,
+                    "path": validated["ttf_path"],
+                })
+
+        if not valid_items:
+            self.font_version_combo.addItem("(no valid generated fonts)", None)
+            self.font_version_combo.setEnabled(False)
+            self.font_preview_label.setText("No valid generated fonts found in this project.")
+            self._selected_font_path = ""
+        else:
+            self.font_version_combo.setEnabled(True)
+            for item in valid_items:
+                self.font_version_combo.addItem(item["label"], item)
+            first = valid_items[0]
+            self._selected_font_path = first["path"]
+            self.font_preview_label.setText(f"✓ Using: {first['label']}")
+
+        self.font_version_combo.blockSignals(False)
+        self._refresh_generate_btn()
+
+    def load_font_projects(self, projects: list[dict[str, Any]], store: FontProjectStore) -> None:
+        """Populate font project dropdown from external data."""
+        self._font_project_store = store
+        self._font_projects = projects
+        self.font_database_combo.blockSignals(True)
+        self.font_database_combo.clear()
+        for p in projects:
+            self.font_database_combo.addItem(p.get("project_name", p["project_id"]),
+                                             p["project_id"])
+        self.font_database_combo.blockSignals(False)
+        if projects:
+            self._populate_font_versions(projects[0]["project_id"])
+
+    # ── Document fingerprint ──────────────────────────────────────────────────
+
+    def _document_fingerprint(self) -> str:
+        """Stable hash of current title + content to detect staleness."""
+        title = self.title_input.text().strip()
+        content = self.content_input.toPlainText().strip()
+        return hashlib.sha256(f"{title}\x00{content}".encode()).hexdigest()
+
+    # ── Generate PDF ──────────────────────────────────────────────────────────
+
+    def _refresh_generate_btn(self) -> None:
+        enabled = bool(self._selected_font_path and self.feature_toggle.is_enabled)
+        self.generate_btn.setEnabled(enabled)
+
+    def _on_generate(self) -> None:
+        title = self.title_input.text().strip() or "Handwritten Document"
+        content = self.content_input.toPlainText().strip()
+        if not content:
+            QMessageBox.warning(self, "No content", "Please type some content before generating.")
+            return
+        # Update session fingerprint before generating
+        self._document_session_id = str(uuid.uuid4())
+        self.generate_pdf_requested.emit(title, content, self._selected_font_path, None)
+
+    # ── PDF result callbacks (called by MainWindow) ───────────────────────────
+
+    def on_pdf_status(self, message: str, progress: float) -> None:
+        self.pdf_status_label.setText(message)
+        self.pdf_status_label.show()
+        self.pdf_progress.setValue(int(progress * 100))
+        self.pdf_progress.show()
+        self.generate_btn.setEnabled(False)
+        self.cancel_btn.show()
+
+    def on_pdf_result(self, data: dict[str, Any]) -> None:
+        self.pdf_status_label.setText(
+            f"✓ PDF generated: {data.get('page_count', 1)} page(s)."
+        )
+        self.pdf_progress.hide()
+        self.cancel_btn.hide()
+        self._refresh_generate_btn()
+        self.download_btn.setEnabled(True)
+        self.open_viewer_btn.setEnabled(True)
+        # Record PDF state for Open in Editor
+        self._pdf_path = data.get("pdf_path", "")
+        self._pdf_session_id = self._document_session_id
+        self._pdf_fingerprint = self._document_fingerprint()
+        self._pdf_font_ref = {"ttf_path": self._selected_font_path}
+        self.open_in_editor_btn.setEnabled(bool(self._pdf_path))
+        # If a pending open-in-editor was triggered during generation, resolve it
+        if self._pending_open_in_editor and self._pending_open_session_id == self._document_session_id:
+            self._pending_open_in_editor = False
+            self._pending_open_session_id = ""
+            self._do_import_pdf_to_editor()
+
+    def on_pdf_error(self, message: str) -> None:
+        self.pdf_status_label.setText(f"⚠ {message}")
+        self.pdf_status_label.show()
+        self.pdf_progress.hide()
+        self.cancel_btn.hide()
+        self._refresh_generate_btn()
+
+    def on_pdf_cancelled(self) -> None:
+        self.pdf_status_label.setText("PDF generation cancelled.")
+        self.pdf_progress.hide()
+        self.cancel_btn.hide()
+        self._refresh_generate_btn()
+
+    # ── Open in Editor ────────────────────────────────────────────────────────
+
+    def open_current_pdf_in_editor(self) -> None:
+        """Import the current PDF into the document editor.
+
+        If the current PDF matches this session's generated document, import
+        it immediately. If stale, request a regeneration and defer the import.
+        """
+        pdf_ok = (
+            bool(self._pdf_path)
+            and self._pdf_session_id == self._document_session_id
+            and self._pdf_fingerprint == self._document_fingerprint()
+        )
+        if pdf_ok:
+            # Check if editor has unsaved changes
+            has_content = any(
+                bool(ed.toPlainText().strip())
+                for ed in self._page_editors
+            )
+            if has_content and not self._confirm_discard():
+                return
+            self._do_import_pdf_to_editor()
+        else:
+            # PDF is stale — request a new generation, then auto-import on completion
+            self._pending_open_in_editor = True
+            self._pending_open_session_id = self._document_session_id
+            self._on_generate()
+
+    def _confirm_discard(self) -> bool:
+        """Return True if user confirms discarding the current editor content."""
+        result = QMessageBox.question(
+            self, "Replace document?",
+            "The editor already contains content. Replace it with this PDF?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        return result == QMessageBox.StandardButton.Yes
+
+    def _do_import_pdf_to_editor(self) -> None:
+        """Import _pdf_path as plain-text pages into _document and _page_editors."""
+        try:
+            import pymupdf  # type: ignore
+            with pymupdf.open(self._pdf_path) as pdf:
+                pages = []
+                for pdf_page in pdf:
+                    text = pdf_page.get_text("text").strip()
+                    pages.append(DocumentPage(html=f"<html><body><p>{text}</p></body></html>"))
+        except Exception as exc:
+            QMessageBox.critical(self, "Import failed",
+                                 f"Could not read PDF for editor import: {exc}")
+            return
+
+        title = self.title_input.text().strip() or "Imported Document"
+        self._document = EditableDocument(
+            title=title,
+            pages=pages or [DocumentPage()],
+            font_ref=dict(self._pdf_font_ref),
+            source_pdf=str(Path(self._pdf_path).resolve()),
+        )
+        # Rebuild page editors
+        for ed in self._page_editors:
+            ed.setParent(None)
+        self._page_editors = []
+        for page in self._document.pages:
+            ed = QPlainTextEdit()
+            # Strip simple HTML tags to get plain text for the editor
+            import re
+            plain = re.sub(r"<[^>]+>", "", page.html).strip()
+            ed.setPlainText(plain)
+            self._page_editors.append(ed)
+
+    # ── Toggle / history helpers ──────────────────────────────────────────────
+
     def _refresh_enabled(self, enabled: bool) -> None:
         self.disabled_notice.setVisible(not enabled)
+        self._refresh_generate_btn()
 
     def update_toggle(self, enabled: bool) -> None:
         self.feature_toggle.set_enabled(enabled)
@@ -947,7 +1338,7 @@ class CreateFilesPage(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         if not entries:
-            empty = QLabel("No file generations yet. This is a future feature.")
+            empty = QLabel("No PDF generations yet.")
             empty.setObjectName("emptyHistory")
             self.history_rows.addWidget(empty)
             return
@@ -955,6 +1346,21 @@ class CreateFilesPage(QWidget):
             row = HistoryRow(text, "Create Files", "files")
             row.copy_clicked.connect(copy_cb)
             self.history_rows.addWidget(row)
+
+
+# ─── Translation page shim ────────────────────────────────────────────────────
+
+class _TranslatePageShim:
+    """Stub satisfying main.py's translate_page API until a dedicated page exists."""
+
+    def populate_history(self, *args, **kwargs) -> None:
+        pass
+
+    def show_model_installed(self) -> None:
+        pass
+
+    def show_model_missing(self, message: str = "") -> None:
+        pass
 
 
 # ─── Main Window ──────────────────────────────────────────────────────────────
@@ -976,6 +1382,30 @@ class MainWindow(QMainWindow):
     font_history_cleared = Signal()
     files_history_cleared = Signal()
     all_history_cleared = Signal()
+    # Font page signals (forwarded from font_page sub-widget)
+    font_generation_requested = Signal()
+    font_cancel_requested = Signal()
+    font_download_ttf_requested = Signal()
+    font_download_otf_requested = Signal()
+    font_project_create_requested = Signal(str)
+    font_project_selected = Signal(str)
+    font_generation_selected = Signal(int)
+    font_sample_selected = Signal(str)
+    font_sample_accept_requested = Signal(str, str)
+    font_candidate_accept_requested = Signal(str, str)
+    font_sample_review_requested = Signal(str)
+    font_sample_remove_requested = Signal(str)
+    font_samples_merge_requested = Signal()
+    # PDF / Files signals (forwarded from files_page sub-widget)
+    pdf_generation_requested = Signal(str, str, str, object)
+    pdf_cancel_requested = Signal()
+    pdf_download_requested = Signal()
+    pdf_open_requested = Signal()
+    # Translation signals
+    translation_requested = Signal(str, str)
+    translation_cancelled = Signal()
+    translation_toggled = Signal(bool)
+    translation_setup_requested = Signal()
 
     _PAGE_CAPTURE = 0
     _PAGE_EXTRACT = 1
@@ -1059,6 +1489,11 @@ class MainWindow(QMainWindow):
         self.files_page.toggled.connect(self._on_files_toggled)
         self.files_page.clear_history_btn.clicked.connect(self._clear_files_history)
         self.history_page.clear_all_btn.clicked.connect(self._clear_all_history)
+        # Forward files_page PDF signals
+        self.files_page.generate_pdf_requested.connect(self.pdf_generation_requested)
+        self.files_page.cancel_pdf_requested.connect(self.pdf_cancel_requested)
+        self.files_page.download_pdf_requested.connect(self.pdf_download_requested)
+        self.files_page.open_pdf_requested.connect(self.pdf_open_requested)
 
         self._apply_theme()
         self.refresh_config()
@@ -1374,6 +1809,107 @@ class MainWindow(QMainWindow):
         self.config.image_path = ""
         self.config.save()
         self.extract_page.clear_file()
+
+    # ── Font page presentation methods (called by main.py) ────────────────────
+
+    def set_font_projects(self, projects: list[dict], active_id: str) -> None:
+        """Refresh the font project selector on both font and files pages."""
+        if hasattr(self.font_page, "_projects_data"):
+            pass  # placeholder — font_page project selector is future scope
+        # Sync to files page font selector
+        store: FontProjectStore | None = getattr(self, "_font_projects_store", None)
+        if store is None:
+            from ..font_projects import FontProjectStore
+            store = FontProjectStore()
+            self._font_projects_store = store
+        self.files_page.load_font_projects(projects, store)
+
+    def set_font_project_statistics(self, count: int, summary: dict, coverage: dict) -> None:
+        self.font_page.set_dataset_summary(count)
+
+    def set_font_project_samples(self, project: dict, samples: list) -> None:
+        pass  # Placeholder — full sample review UI is future scope
+
+    def set_font_project_generation(
+        self, generation: dict | None, history: list
+    ) -> None:
+        self.font_page.set_generation_badge(generation)
+
+    def show_font_error(self, message: str) -> None:
+        self.font_page.intake_status.setText(f"⚠ {message}")
+        self.font_page.intake_progress.hide()
+
+    def show_font_cancelled(self) -> None:
+        self.font_page.intake_status.setText("Font generation cancelled.")
+        self.font_page.intake_progress.hide()
+
+    def update_font_status(self, message: str, progress: float = 0.0) -> None:
+        self.font_page.intake_progress.setText(f"⏳ {message}")
+        self.font_page.intake_progress.show()
+
+    def show_font_result(self, data: dict) -> None:
+        self.font_page.intake_progress.hide()
+        v = int(data.get("version", 0))
+        glyphs = data.get("glyph_count", 0)
+        self.font_page.intake_status.setText(
+            f"✓ Font v{v:03d} generated successfully with {glyphs} glyphs."
+        )
+        self.font_page.set_generation_badge(data)
+
+    def show_font_intake_error(self, message: str) -> None:
+        self.font_page.show_intake_error(message)
+
+    def show_font_intake_progress(self, message: str) -> None:
+        self.font_page.show_intake_progress(message)
+
+    def show_font_intake_result(self, result: dict) -> None:
+        self.font_page.show_intake_result(result)
+
+    def show_font_sample_accepted(self, entry: dict) -> None:
+        char = entry.get("char", "?")
+        self.font_page.intake_status.setText(f"✓ Glyph '{char}' accepted into dataset.")
+
+    def show_font_samples_merged(self, count: int) -> None:
+        self.font_page.intake_status.setText(
+            f"✓ Merged {count} accepted glyph(s) into the font dataset."
+        )
+
+    # ── PDF / Files presentation methods (called by main.py) ─────────────────
+
+    def show_pdf_result(self, data: dict) -> None:
+        self.files_page.on_pdf_result(data)
+
+    def show_pdf_error(self, message: str) -> None:
+        self.files_page.on_pdf_error(message)
+
+    def update_pdf_status(self, message: str, progress: float = 0.0) -> None:
+        self.files_page.on_pdf_status(message, progress)
+
+    def show_pdf_cancelled(self) -> None:
+        self.files_page.on_pdf_cancelled()
+
+    # ── Translation presentation methods (called by main.py) ──────────────────
+
+    def show_translation_error(self, message: str) -> None:
+        pass  # Translation UI is on a dedicated page (future scope)
+
+    def update_translation_status(self, status_kind: str, detail: str) -> None:
+        pass  # Translation UI is on a dedicated page (future scope)
+
+    def show_translation_result(
+        self, original: str, translated: str, source_lang: str, source_name: str
+    ) -> None:
+        pass  # Translation UI is on a dedicated page (future scope)
+
+    def show_translation_cancelled(self) -> None:
+        pass  # Translation UI is on a dedicated page (future scope)
+
+    # ── Translate page shim (translation page may not exist yet) ─────────────
+
+    @property
+    def translate_page(self):
+        """Shim for main.py translate_page references when no dedicated page exists."""
+        return _TranslatePageShim()
 
     # ── Window lifecycle ──────────────────────────────────────────────────────
 

@@ -1,31 +1,32 @@
-﻿# Voice Input — Complete Project Documentation
+# Verbum (Voice Input) — Complete Project Documentation
 
-> **Current Version: v6** | **Platform: Windows 10/11 (64-bit)** | **Language: Python 3.14**
+> **Current Version: Verbum (v6+)** | **Platform: Windows 10/11 (64-bit)** | **Language: Python 3.14**
 
 ---
 
 ## Table of Contents
 
 1. [Project Overview](#1-project-overview)
-2. [Feature List v6 Current](#2-feature-list-v6--current)
+2. [Feature List & Capabilities](#2-feature-list--capabilities)
 3. [Architecture and How It Works](#3-architecture--how-it-works)
 4. [File and Folder Structure](#4-file--folder-structure)
 5. [Module Reference](#5-module-reference)
 6. [Configuration Reference](#6-configuration-reference)
 7. [UI Reference](#7-ui-reference)
-8. [How to Build](#8-how-to-build-development--executable)
-9. [Version History](#9-version-history)
-10. [Known Issues Fixed in v6](#10-known-issues-fixed-in-v6)
-11. [Dependencies](#11-dependencies)
-12. [Logs and Debugging](#12-logs--debugging)
+8. [How to Build (Development & Executable)](#8-how-to-build-development-to-executable)
+9. [Handwriting Glyph Extraction Pipeline](#9-handwriting-glyph-extraction-pipeline)
+10. [Version History](#10-version-history)
+11. [Known Issues Fixed in v6](#11-known-issues-fixed-in-v6)
+12. [Dependencies](#12-dependencies)
+13. [Logs and Debugging](#13-logs--debugging)
 
 ---
 
 ## 1. Project Overview
 
-Voice Input is a fully private, local, offline voice transcription tool for Windows.
-It lives in the system tray and lets you dictate text anywhere on your computer using Ctrl + Space.
-All transcription is done locally using OpenAI Whisper via the faster-whisper library. No audio ever leaves your machine.
+**Verbum** (originally Voice Input) is a 100% private, local-first Windows desktop productivity suite.
+It provides local voice transcription, multi-format text extraction (OCR & document parsing), offline neural machine translation to English, and an automated handwriting glyph extraction pipeline. All processing runs completely on-device without telemetry or cloud calls.
+
 
 ### Core Concept
 
@@ -40,39 +41,53 @@ All transcription is done locally using OpenAI Whisper via the faster-whisper li
 
 ---
 
-## 2. Feature List (v6 — Current)
-
-### Transcription
+## 2. Feature List & Capabilities
+ 
+### Voice Transcription
 - 100% local and offline — Whisper runs on your machine, zero cloud calls
 - Whisper model selector: tiny, base, small, medium (more accurate = slower to load)
 - Language selector: auto (auto-detect) or en (force English)
 - Device selector: auto (CPU), cpu, or cuda (NVIDIA GPU acceleration)
 - VAD fallback: If Whisper VAD filters out quiet speech, a second pass runs without VAD to catch it
 - CUDA fallback: If GPU is selected but CUDA runtime DLLs are missing, worker silently falls back to CPU/int8
-
+ 
 ### Hotkey System (Hybrid Push-to-Talk + Toggle)
 - Hold mode (Push-to-Talk): Hold Ctrl+Space for more than 350ms, records while held, transcribes on release
 - Tap mode (Toggle): Quick tap under 350ms latches recording ON; tap again to stop and transcribe
 - Implemented with a native Windows low-level keyboard hook (SetWindowsHookExW, WH_KEYBOARD_LL) on its own dedicated thread
 - Space key is suppressed while Ctrl+Space is active to prevent accidental input-language switches
-
+ 
 ### Output Options
 - Copy to clipboard (default): transcript text goes to your clipboard
 - Auto-paste: after copying, simulates Ctrl+V to paste directly into the active application at cursor position
-
-### UI
-- Main window: Status card, hotkey instructions, reference image panel, recent transcription history
-- System tray: always-accessible icon with status tooltip, Open, Settings, About, Exit menu
-- Recording overlay: floating frameless widget at bottom of screen; animates a red pulsing dot while recording
-- Settings window: full settings form with live microphone list, model/device/language dropdowns, copy/paste toggles
-- Clear history button (dark red): wipes the last 5 transcriptions from config
-- Clear image button (dark red): removes the reference image
-
+ 
+### Text Extraction & Multi-Format OCR
+- RapidOCR (ONNX Runtime) for images (`.png`, `.jpg`, `.jpeg`, `.bmp`, `.webp`, `.tiff`)
+- Dual-pass PDF parsing: digital text stream via PyMuPDF (`fitz`), falling back to ONNX OCR for scanned pages
+- Word documents (`.docx`) paragraph and table extraction via `python-docx`
+- Vector SVG text extraction via XML parser
+- Non-blocking background worker (`app/extraction_worker.py`)
+ 
+### Local Multilingual Translation (M2M-100)
+- Local CTranslate2 int8 quantized Meta `facebook/m2m100_418M` model
+- 100 languages directly translated into English with local `langdetect` detection
+- Long-lived persistent background worker (`app/translation_worker.py`) caching weights in RAM
+- Auto detect and manual language selection modes
+- Zero cloud reliance; fully offline once weights are present
+ 
+### Modern UI & Desktop Experience
+- Modern collapsible sidebar navigation (expanded icons+labels or compact rail)
+- Distinct pages: Capture, Extract Text, Translate, Create Font, Create Files, History, Settings
+- System tray integration with background minimization
+- Animated floating recording overlay with live status feedback
+- Unified History page tracking Voice, Extraction, and Translation events
+ 
 ### System
 - Single-instance mutex: Only one copy of VoiceInput.exe can run at a time (CreateMutexW)
 - Windows startup: optional registry entry under HKCU Software Microsoft Windows CurrentVersion Run
-- Pre-warmed worker: Whisper model begins loading as soon as the app starts
-- Background tray mode: closing the main window hides it to the tray
+- Pre-warmed Whisper worker on application start
+- Isolated worker processes for CPU/memory separation
+
 
 ---
 
@@ -80,75 +95,124 @@ All transcription is done locally using OpenAI Whisper via the faster-whisper li
 
 ### Process Layout
 
-VoiceInput.exe (main process) contains:
-- Qt Event Loop (main thread) with VoiceInputApp controller, MainWindow, RecordingOverlay, SettingsWindow, Tray
-- VoiceInputHotkey (daemon thread) with Windows message loop and WH_KEYBOARD_LL hook
-- Whisper Worker (separate OS process, daemon) with faster-whisper WhisperModel loaded in RAM
+VoiceInput.exe / Verbum (main process) contains:
+- Qt Event Loop (main thread) with `VoiceInputApp` controller, `MainWindow` (collapsible navigation tabs: Capture, Extract, Translate, Font, Files, History, Settings), `RecordingOverlay`, `SettingsWindow`, `Tray`
+- `VoiceInputHotkey` (daemon thread) with Windows message loop and native `WH_KEYBOARD_LL` hook
+- Whisper Worker (separate OS process, daemon) with `faster-whisper` WhisperModel loaded in RAM
+- Extraction Worker (separate OS subprocess) executing RapidOCR and document parsers off-thread
+- Translation Worker (separate OS long-lived persistent process) keeping quantized M2M-100 model in RAM
 
 ### Data Flow
 
-1. Keyboard Hook Thread: Ctrl+Space down fires on_press signal via HotkeyBridge
-2. Qt Main Thread start_recording: Recorder.start() opens sounddevice InputStream at 16kHz float32 mono
-3. Keyboard Hook Thread: Ctrl+Space up or second tap fires on_release signal
-4. Qt Main Thread stop_recording: Recorder.stop() concatenates numpy chunks, sends to worker via Queue
-5. Worker Process _run: WhisperModel.transcribe with vad_filter=True, retry without VAD if empty, put result on results Queue
-6. Qt Main Thread poll_worker QTimer 100ms: reads result, updates config, updates UI, pastes or copies
+1. **Voice Dictation**:
+   - Keyboard Hook Thread: `Ctrl+Space` down fires `pressed` signal via `HotkeyBridge`
+   - Qt Main Thread `start_recording`: `Recorder.start()` opens sounddevice `InputStream` at 16kHz float32 mono
+   - Keyboard Hook Thread: `Ctrl+Space` up or second tap fires `released` signal
+   - Qt Main Thread `stop_recording`: `Recorder.stop()` concatenates numpy chunks, sends to Whisper worker via Queue
+   - Worker Process `_run`: `WhisperModel.transcribe` with `vad_filter=True`, fallback without VAD if empty, puts result on queue
+   - Qt Main Thread `poll_worker` (100ms QTimer): reads result, updates history/config, updates UI, copies to clipboard and/or auto-pastes
+2. **Document / OCR Extraction**:
+   - Files dropped into `ExtractPage` -> queued to `extraction_worker.py`
+   - PDF digital text extracted via `PyMuPDF` (`fitz`); scanned pages parsed via `RapidOCR`
+   - Word (`.docx`) parsed via `python-docx`; SVGs parsed via XML text node traversal
+   - Results emitted back to UI and recorded into `HistoryPage`
+3. **Neural Machine Translation**:
+   - Source text entered on `TranslatePage` -> queued to `translation_worker.py`
+   - Language identified via `langdetect` (or chosen manually)
+   - Translated to English via int8 quantized `facebook/m2m100_418M` on CTranslate2
+   - Cached warm model provides sub-second repeat translations
 
 ### Worker Lifecycle
 
-On app start: ensure_worker() called immediately for pre-warming.
-start_worker() spawns multiprocessing.Process running _run().
-_run() loads the model, tests CUDA if needed, sends ( ready, ) on results queue.
-poll_worker sees ready message and sets worker_state = READY.
-On Ctrl+Space: ensure_worker() is noop if alive, audio put on command_queue.
-Worker loop: blocking commands.get(), transcribe, put result.
-On app exit: finish_worker() sends None command for graceful exit, then terminates if needed.
+- Whisper: `ensure_worker()` called on app start for pre-warming. Worker loop reads command queue and transcribes.
+- Translation: `ensure_translation_worker()` spawns long-lived worker when translation is enabled; model stays resident until disabled or app exit.
+- Extraction: Dispatches jobs asynchronously without blocking Qt rendering.
 
 ### HotkeyBridge
 
 The keyboard hook lives on a non-Qt thread. Direct Qt UI calls from non-Qt threads crash the app.
-HotkeyBridge is a QObject with two Signal() pressed and released.
-The hook callbacks call signal.emit() which Qt safely marshals to the main thread via QueuedConnection.
+`HotkeyBridge` is a QObject with two signals: `pressed` and `released`.
+The hook callbacks call `signal.emit()` which Qt safely marshals to the main thread via `QueuedConnection`.
 
 ---
 
 ## 4. File and Folder Structure
 
-`
+```text
 c:/Projects/Transcriber/
-├── main.py Entry point, calls app.main.run()
-├── requirements.txt Python dependencies
-├── VoiceInput.spec PyInstaller build spec
-├── config.json User config (auto-created, JSON)
-├── PROJECT_DOCS.md This file
+├── main.py                    # Entry point, calls app.main.run()
+├── requirements.txt           # Python dependencies
+├── VoiceInput.spec            # PyInstaller build spec
+├── config.json                # User config (auto-created, JSON)
+├── build.bat                  # PyInstaller Windows build script
+├── PROJECT_DOCS.md            # Complete project documentation
+├── PROJECT_STATUS.md          # Current project status and task tracker
+├── README.md                  # Project overview and instructions
 │
 ├── app/
-│ ├── main.py VoiceInputApp controller + run()
-│ ├── config.py Config dataclass + load/save
-│ ├── hotkey.py Native WH_KEYBOARD_LL hook
-│ ├── recorder.py 16kHz sounddevice microphone recorder
-│ ├── transcriber.py Whisper model loader + transcribe logic
-│ ├── worker.py Multiprocessing worker process
-│ ├── clipboard.py copy_text() + paste_text() via SendInput
-│ ├── autostart.py Windows registry startup entry
-│ └── ui/
-│ ├── main_window.py Main app window
-│ ├── settings_window.py Settings form
-│ ├── recording_overlay.py Floating recording indicator widget
-│ └── tray.py System tray icon and menu
+│   ├── main.py                # VoiceInputApp controller + run()
+│   ├── config.py              # Config dataclass + JSON persistence
+│   ├── hotkey.py              # Native WH_KEYBOARD_LL low-level hook
+│   ├── recorder.py            # 16kHz sounddevice microphone recorder
+│   ├── transcriber.py         # Whisper model loader + transcribe logic
+│   ├── worker.py              # Multiprocessing Whisper worker process
+│   ├── extraction.py          # RapidOCR & document parsing (PDF, DOCX, SVG)
+│   ├── extraction_worker.py   # Subprocess worker for extraction/OCR
+│   ├── translation.py         # M2M-100 model loader & tokenizer logic
+│   ├── translation_worker.py  # Persistent background translation worker
+│   ├── clipboard.py           # copy_text() + paste_text() via SendInput
+│   ├── autostart.py           # Windows registry startup entry
+│   └── ui/
+│       ├── icons.py           # Vector SVG icons & canvas painters
+│       ├── main_window.py     # Main window with sidebar navigation
+│       ├── recording_overlay.py # Floating recording indicator widget
+│       ├── settings_window.py # Modal settings dialog
+│       └── tray.py            # System tray icon and menu
 │
-├── tests/ pytest test suite
+├── dataset/
+│   ├── raw/                   # Immutable original handwriting photos (6 sheets)
+│   ├── glyphs/                # Normalized 128x128 character images (966 glyphs)
+│   │   ├── uppercase/         # A-Z (26 characters x 14 variations)
+│   │   ├── lowercase/         # a-z (26 characters x 14 variations)
+│   │   ├── numbers/           # 0-9 (10 digits x 14 variations)
+│   │   └── punctuation/       # . , : () {} [] - (7 symbols x 14 variations)
+│   ├── review/                # Contact sheets and flagged review samples
+│   └── processed/
+│       └── debug_inspect/     # Visual grid overlay inspection images
 │
-├── release-v6/ CURRENT RELEASE
-│ └── VoiceInput/
-│ └── VoiceInput.exe The compiled executable
+├── metadata/
+│   ├── glyph_manifest.csv     # Full CSV manifest with bounding boxes & metrics
+│   └── glyph_manifest.json    # Full JSON manifest with dataset summaries
 │
-├── release-v5/
-├── release-v4/
-├── release-v3/
-├── release-v2/
-└── release/
-`
+├── tools/
+│   ├── pipeline/              # Modular glyph extraction pipeline components
+│   │   ├── cell_extractor.py  # Grid suppression, component clustering
+│   │   ├── config.py          # Template schemas & physical grid anchors
+│   │   ├── grid_detector.py   # Peak-snapping lattice solver
+│   │   ├── image_io.py        # EXIF orientation & image loading
+│   │   ├── manifest.py        # CSV / JSON manifest generator
+│   │   ├── normalizer.py      # Proportional 128x128 centering
+│   │   ├── page_detector.py   # Rotational deskewing
+│   │   └── quality_scorer.py  # Contrast & blur quality assessment
+│   ├── build_contact_sheet.py # Contact sheet generator CLI
+│   ├── eval_methods.py        # Empirical CV method comparative evaluation
+│   ├── extract_glyphs.py      # Main batch extraction CLI
+│   └── inspect_grid.py        # Grid visualization CLI
+│
+├── tests/                     # Automated test suite (pytest: 65 tests passing)
+│   ├── test_autostart.py
+│   ├── test_config.py
+│   ├── test_extraction.py
+│   ├── test_glyph_extraction.py
+│   ├── test_hotkey.py
+│   ├── test_transcriber.py
+│   └── test_translation.py
+│
+├── release-v6/                # Executable release build
+│   └── VoiceInput/
+│       └── VoiceInput.exe     # The compiled executable
+└── models/                    # Local model cache (excluded from git)
+```
 
 ---
 
@@ -254,27 +318,64 @@ paste_text(text)
 
 ---
 
+### app/extraction.py & app/extraction_worker.py — Text Extraction & OCR
+
+- RapidOCR integration for image OCR (`.png`, `.jpg`, `.jpeg`, `.bmp`, `.webp`, `.tiff`).
+- Multi-format document parser:
+  - `.pdf`: Digital text extraction using `PyMuPDF` (`fitz`), automatic OCR fallback for scanned pages.
+  - `.docx`: Paragraph and table text extraction using `python-docx`.
+  - `.svg`: XML parsing extracting embedded text nodes.
+- Background worker execution (`app/extraction_worker.py`) keeping the UI thread responsive during heavy OCR.
+
+---
+
+### app/translation.py & app/translation_worker.py — Offline Neural Machine Translation
+
+- Local CTranslate2 int8 model (`facebook/m2m100_418M`).
+- Tokenizer: `sentencepiece` BPE tokenizer.
+- Language identification: `langdetect` with confidence score.
+- Auto & manual source language selection with 100 language coverage.
+- Long-lived persistent worker process (`app/translation_worker.py`) maintaining warm model weights in memory.
+- Safe CUDA initialization with graceful CPU fallback.
+
+---
+
 ### app/config.py — Persistent Settings
 
 Config dataclass fields:
-  hotkey          list[str]   [ctrl,space]   Fixed, not user-changeable
-  model           str         small            Whisper model size
-  language        str         auto             Transcription language
-  device          str         auto             Inference device
-  compute_type    str         auto             CTranslate2 quantization
-  microphone      str         default          Input device name
-  auto_copy       bool        True               Copy transcript to clipboard
-  auto_paste      bool        False              Also paste at cursor
-  sound_feedback  bool        False              Reserved, not yet used
-  start_with_windows bool     False              Registry startup entry
-  image_path      str          Reference image path
- recent_transcriptions list [] Last 5 transcripts
+  hotkey                  list[str]   [ctrl, space]   Fixed, not user-changeable
+  model                   str         small           Whisper model size
+  language                str         auto            Transcription language
+  device                  str         auto            Inference device
+  compute_type            str         auto            CTranslate2 quantization
+  microphone              str         default         Input device name
+  auto_copy               bool        True            Copy transcript to clipboard
+  auto_paste              bool        False           Also paste at cursor
+  sound_feedback          bool        False           Reserved, not yet used
+  start_with_windows      bool        False           Registry startup entry
+  image_path              str         ""              Reference image path
+  voice_history           list        []              Last 5 voice transcripts
+  extraction_history      list        []              Last 5 extraction entries
+  font_history            list        []              Last 5 font entries
+  files_history           list        []              Last 5 files entries
+  translation_history     list        []              Last 5 translation records
+  enable_extraction       bool        True            Enable Extract feature
+  enable_font             bool        False           Enable Font feature
+  enable_files            bool        False           Enable Files feature
+  enable_translation      bool        False           Enable Translation feature
+  translation_detect_mode str         "auto"          "auto" | "manual"
+  translation_source_lang str         "fr"            ISO code used in manual mode
+  sidebar_collapsed       bool        False           Sidebar state
+  recent_transcriptions   list        []              Legacy field synced with voice_history
 
 Config file location:
- Frozen EXE: %LOCALAPPDATA%\VoiceInput\config.json
- Development: project_root\config.json
+  Frozen EXE: %LOCALAPPDATA%\VoiceInput\config.json
+  Development: project_root\config.json
 
-add_recent_transcription(text): prepends text, keeps last 5, saves immediately.
+add_voice_history(text): prepends text, keeps last 5, saves immediately.
+add_extraction_history(text, label): prepends extraction result, keeps last 5, saves immediately.
+add_translation_history(source_lang, source_name, original, translated): prepends translation record, keeps last 5, saves immediately.
+
 
 ---
 
@@ -286,25 +387,21 @@ Value is the full path to the executable. Uses HKCU so no admin rights are neede
 
 ---
 
-### app/ui/main_window.py — Main Window
+### app/ui/main_window.py — Main Window & Navigation
 
-ImageDropZone(QLabel)
- Accepts file drag-and-drop for png, jpg, jpeg, bmp, gif, webp.
- Shows scaled preview (300x170 max) or placeholder text.
+MainWindow(QMainWindow) features a modern desktop layout with collapsible sidebar navigation:
+- **Collapsible Sidebar**:
+  - Expanded mode (icons + labels) and compact icon-only rail mode.
+  - Page selectors: Capture, Extract Text, Translate, Create Font, Create Files, History, Settings.
+- **Pages**:
+  - **CapturePage**: Status indicator, waveform/RMS visualizer, push-to-talk / toggle hotkey guide, and latest transcript display.
+  - **ExtractPage**: File drop zone (PDF, DOCX, SVG, PNG, JPG, WEBP), progress bar, formatted extraction output, and copy button.
+  - **TranslatePage**: Source text input, Auto / Manual language selection (100 languages), swap controls, confidence indicator, and instant translation to English.
+  - **FontPage**: Project-aware glyph intake, generation/version history, generated-font specimen, live handwriting preview, and font export.
+  - **FilesPage / Create Files**: Multi-page rich-text editor, atomic `.vdoc` save/open, PDF import with scanned-page visual fallback, standard and active-project generated TTF selection, text/paragraph formatting, lists, tables, images with nondestructive adjustment, pen annotation image insertion, and rich searchable PDF export through the existing background worker.
+  - **HistoryPage**: Unified chronological feed of all past Voice, Extraction, and Translation operations with badge filters, timestamps, and copy actions.
+  - **SettingsPage / SettingsWindow**: Complete preference management (Whisper model, audio device, autostart, auto-paste, feature toggles).
 
-MainWindow(QMainWindow) contains:
- - Status card (state title and detail message, color-coded by state)
- - Instruction card (hotkey explanation)
- - Image group (drop zone + Clear image + Browse image)
- - History group (last 5 transcriptions + Clear history)
- - Config summary bar (model | device | language)
- 
- Key methods:
- - update_status(state, detail): updates status card colors
- - refresh_config() -> _redisplay(): re-renders current in-memory config (no disk read)
- - _redisplay(): updates history label, image drop zone, config summary
- - clear_history(): sets recent_transcriptions = [], saves, redraws
- - clear_image(): sets image_path = , saves, redraws
 
 ---
 
@@ -340,23 +437,37 @@ Single-click or double-click on tray icon opens main window.
 
 ## 6. Configuration Reference
 
-Config is stored as plain JSON. You can edit it manually while the app is closed.
+Config is stored as plain JSON (`config.json` in root during development, or `%LOCALAPPDATA%\VoiceInput\config.json` in frozen EXE).
 
-Default config.json:
+Default configuration schema:
+```json
 {
-  hotkey: [ctrl, space],
-  model: small,
-  language: auto,
-  device: auto,
-  compute_type: auto,
-  microphone: default,
-  auto_copy: true,
-  auto_paste: false,
-  sound_feedback: false,
-  start_with_windows: false,
-  image_path: ,
- recent_transcriptions: []
+  "hotkey": ["ctrl", "space"],
+  "model": "small",
+  "language": "auto",
+  "device": "auto",
+  "compute_type": "auto",
+  "microphone": "default",
+  "auto_copy": true,
+  "auto_paste": false,
+  "sound_feedback": false,
+  "start_with_windows": false,
+  "image_path": "",
+  "voice_history": [],
+  "extraction_history": [],
+  "font_history": [],
+  "files_history": [],
+  "translation_history": [],
+  "enable_extraction": true,
+  "enable_font": false,
+  "enable_files": false,
+  "enable_translation": false,
+  "translation_detect_mode": "auto",
+  "translation_source_lang": "fr",
+  "sidebar_collapsed": false,
+  "recent_transcriptions": []
 }
+```
 
 ### Model Performance Guide
 
@@ -374,6 +485,7 @@ Default config.json:
 | auto | Uses CPU with int8 quantization (safest, no driver requirements) |
 | cpu | Explicit CPU, uses compute_type setting |
 | cuda | Tries NVIDIA GPU; falls back to CPU if CUDA DLLs are missing |
+
 
 ---
 
@@ -402,60 +514,112 @@ Default config.json:
 
 ### Prerequisites
 
-- Python 3.14 (any 3.10+ works)
-- Windows 10 or 11
+- Python 3.14 (or Python 3.10+)
+- Windows 10 or 11 (64-bit)
 
 ### Setup First Time
 
-`powershell
+```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-`
+```
 
 ### Run in Development Mode
 
-`powershell
+```powershell
 .\.venv\Scripts\python.exe main.py
-`
+```
 
 ### Run Tests
 
-`powershell
-.\.venv\Scripts\pytest.exe tests/
-`
+Run the full automated test suite (65 passing unit and integration tests):
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/
+```
 
 ### Build the Executable
 
-`powershell
-.\.venv\Scripts\pyinstaller.exe --noconfirm --clean --windowed --name VoiceInput --collect-all faster_whisper main.py
-`
+Use the provided build batch script or PyInstaller directly with `VoiceInput.spec`:
 
-Build flags:
- --noconfirm Overwrite previous dist without prompting
- --clean Delete PyInstaller cache before build
- --windowed No console window (GUI app)
- --name VoiceInput Output exe name
- --collect-all Bundle all faster_whisper data/binaries
+```powershell
+.\build.bat
+```
 
-Output location: dist\VoiceInput\VoiceInput.exe
+Or via PowerShell:
+```powershell
+.\.venv\Scripts\pyinstaller.exe --noconfirm --clean VoiceInput.spec
+```
+
+`VoiceInput.spec` automatically bundles runtime binaries and assets for:
+- `faster_whisper`
+- `ctranslate2`
+- `rapidocr_onnxruntime`
+- `pymupdf`
+- `python-docx`
+- `sentencepiece`
+- `langdetect`
+- `huggingface_hub`
+
+Output location: `dist\VoiceInput\VoiceInput.exe`
 
 ### Deploy to Release Folder
 
-`powershell
+```powershell
 robocopy dist\VoiceInput release-v6\VoiceInput /E /PURGE /IS /IT
-`
+```
 
 ### Important Build Notes
 
-- mp.freeze_support() must be the very first call in run() for multiprocessing to work in frozen exe
-- The single-instance mutex check comes immediately after freeze_support() so duplicate launches exit instantly
-- faster_whisper must use --collect-all because it has binary DLLs and tokenizer data files
-- The worker process inherits the frozen executable module path via PyInstaller pyi_rth_multiprocessing hook
+- `mp.freeze_support()` must be the very first call in `run()` for multiprocessing to work in frozen exe
+- The single-instance mutex check comes immediately after `freeze_support()` so duplicate launches exit instantly
+- All dynamic dependencies and model runtimes are declared in `VoiceInput.spec`
+- The worker processes inherit the frozen executable module path via PyInstaller's `pyi_rth_multiprocessing` hook
 
 ---
 
-## 9. Version History
+## 9. Handwriting Glyph Extraction Pipeline
+
+Verbum includes a high-precision computer vision pipeline in `tools/` and `tools/pipeline/` for converting photographed handwriting grid sheets into standard 128×128 grayscale character images.
+
+### Pipeline Stages
+
+1. **Orientation & Loading (`image_io.py`)**: Loads images non-destructively, correcting camera EXIF orientation flags.
+2. **Deskewing (`page_detector.py`)**: Estimates tilt angle and applies rotational deskewing (e.g., 1.37° affine correction).
+3. **Lattice Solving (`grid_detector.py`)**: Morphological line filtering and anchor-guided peak snapping against physical grid lines.
+4. **Component Extraction (`cell_extractor.py`)**: Crops cells with safe inset padding, removes border intersections / L-junctions, and intelligently groups multi-stroke characters (`i`, `j`, `:`, `()`, `{}`).
+5. **Centering & Normalization (`normalizer.py`)**: Scales characters proportionally, centering on a 128×128 canvas with pure 255 background.
+6. **Quality Scoring (`quality_scorer.py`)**: Computes ink contrast, edge blur (Laplacian variance), bounding-box margin sanity, and categorizes into GOOD, REVIEW, or REJECT.
+7. **Manifests (`manifest.py`)**: Serializes full metadata into `metadata/glyph_manifest.csv` and `metadata/glyph_manifest.json`.
+
+### CLI Commands
+
+- **Extract all sheets:**
+  ```powershell
+  .\.venv\Scripts\python.exe tools/extract_glyphs.py --all
+  ```
+- **Inspect grid lattices:**
+  ```powershell
+  .\.venv\Scripts\python.exe tools/inspect_grid.py --all
+  ```
+- **Generate QA contact sheets:**
+  ```powershell
+  .\.venv\Scripts\python.exe tools/build_contact_sheet.py
+  ```
+- **Run CV method benchmarks:**
+  ```powershell
+  .\.venv\Scripts\python.exe tools/eval_methods.py
+  ```
+- **Run glyph unit tests:**
+  ```powershell
+  .\.venv\Scripts\python.exe -m pytest tests/test_glyph_extraction.py
+  ```
+
+---
+
+## 10. Version History
+
 
 | Version | Key Changes |
 |--------------|-------------|
@@ -468,7 +632,7 @@ robocopy dist\VoiceInput release-v6\VoiceInput /E /PURGE /IS /IT
 
 ---
 
-## 10. Known Issues Fixed in v6
+## 11. Known Issues Fixed in v6
 
 ### Bug: Whisper stopped before returning a result
 Root cause: poll_worker() ran every 100ms and called worker.is_alive(). When the worker process was freshly
@@ -505,31 +669,38 @@ Fix: Replaced with clear_history() and clear_image() methods that zero out data,
 
 ---
 
-## 11. Dependencies
+## 12. Dependencies
 
-`
-sounddevice >= 0.5.1 Microphone capture via PortAudio
-numpy >= 2.0.0 Audio array manipulation
-faster-whisper >= 1.1.1 Whisper inference (CTranslate2 backend)
-pyperclip >= 1.9.0 Cross-platform clipboard access
-PySide6 >= 6.8.0 Qt6 GUI framework (Qt for Python)
-pytest >= 8.0.0 Test runner
-pyinstaller >= 6.11.0 Windows executable packaging
-`
-
-faster-whisper internally depends on:
- - ctranslate2: optimized inference engine (CPU int8 / CUDA float16)
- - huggingface_hub: model download/caching
- - tokenizers: Whisper tokenizer
+```text
+sounddevice >= 0.5.1       Microphone capture via PortAudio
+numpy >= 2.0.0             Audio array manipulation & CV matrix operations
+faster-whisper >= 1.1.1    Whisper inference (CTranslate2 backend)
+pyperclip >= 1.9.0         Cross-platform clipboard access
+PySide6 >= 6.8.0           Qt6 GUI framework (Qt for Python)
+pytest >= 8.0.0            Test runner
+pyinstaller >= 6.11.0      Windows executable packaging
+pymupdf >= 1.24.0          PDF rendering and digital text stream extraction
+rapidocr-onnxruntime >= 1.2.0  Local ONNX OCR engine
+pillow >= 10.0.0           Image processing and raster manipulation
+python-docx >= 1.0.0       Word document paragraph/table parser
+sentencepiece >= 0.2.0     Subword BPE tokenization for translation
+ctranslate2 >= 4.5.0       Fast neural machine translation engine
+langdetect >= 1.0.9        Offline language identification
+huggingface-hub >= 0.20.0  Hugging Face model repository resolver
+fonttools >= 4.66.0        TrueType/OpenType font table creation & CFF compilation
+reportlab >= 5.0.0         Flowable document layout & TTF vector embedding
+opencv-python >= 4.9.0     Computer vision contour vectorization & polygon reduction
+```
 
 System requirements:
- - Windows 10/11 (64-bit)
- - PortAudio (bundled inside sounddevice wheel as libportaudio64bit.dll)
- - For CUDA: NVIDIA GPU + CUDA 12.x runtime (cublas64_12.dll on PATH)
+- Windows 10/11 (64-bit)
+- PortAudio (bundled inside sounddevice wheel as libportaudio64bit.dll)
+- For CUDA: NVIDIA GPU + CUDA 12.x runtime (cublas64_12.dll on PATH)
 
 ---
 
-## 12. Logs and Debugging
+## 13. Logs and Debugging
+
 
 ### Log File Location
 
@@ -571,3 +742,66 @@ System requirements:
 3. Transcribing never finishes: Check log for worker timeout or crash, try changing model to tiny
 4. Empty transcription: Check Captured 0 audio samples in log, check Settings Microphone selection
 5. CUDA error: Switch device to auto or cpu in Settings
+
+---
+
+## 14. Personal Handwriting Font Generation (Step 3)
+
+### Overview
+Verbum Step 3 transforms the verified 966-glyph dataset into native installable TrueType (`.ttf`) and OpenType (`.otf`) fonts (`fonts/Verbum_Handwriting.ttf` and `fonts/Verbum_Handwriting.otf`).
+
+### Vectorization Architecture (`app/font_generator.py`)
+1. **Contour Extraction**: Uses OpenCV Teh-Chin border following algorithm (`cv2.findContours` with `RETR_CCOMP`) preserving inner holes (e.g. `O`, `P`, `0`, `B`, `e`).
+2. **Polygon Simplification**: Applies Douglas-Peucker reduction with `epsilon = 0.7` to balance point density (~46 points per glyph) and stroke fidelity.
+3. **TrueType Quadratic Spline Fitting**: Midpoints between polygon vertices serve as on-curve anchors; original polygon vertices serve as off-curve quadratic control points (`qCurveTo`).
+4. **Winding Orientation**: Enforces clockwise outer contours and counter-clockwise inner hole contours via the Shoelace formula in font coordinate space ($Y$ pointing upward).
+5. **Typographical Metric Space**:
+   - `unitsPerEm` = 1000
+   - Baseline $Y = 0$
+   - Cap Height = 700
+   - x-height = 490
+   - Ascender = 720
+   - Descender = -210
+   - Sidebearings: LSB = 55, RSB = 55; Space advance = 320.
+6. **OpenType & TrueType Tables Built**:
+   - `head`: Font revision, units per em, bounding boxes.
+   - `hhea` / `hmtx`: Horizontal header and per-glyph advance widths.
+   - `maxp`: Maximum profiles.
+   - `OS/2`: Typographic metrics, Panose, weight/width classes, CodePage ranges.
+   - `name`: Family name, PostScript name, sub-family ("Regular"), unique IDs.
+   - `cmap`: Format 4 Unicode BMP mapping table.
+   - `glyf` / `loca`: TrueType quadratic outlines.
+   - `CFF `: OpenType Compact Font Format table (for `.otf`).
+   - `post`: PostScript table (format 3.0).
+
+### Multiprocessing & UI Integration
+- **Worker (`app/font_worker.py`)**: Subprocess execution prevents GUI freezes during raster vectorization. Supports real-time progress callbacks and cancel events.
+- **UI (`CreateFontPage`)**: Dataset coverage status cards, live generation progress bar, specimen card rendering (`dataset/review/font_specimen_preview.png`), interactive live test input box rendered directly in the generated font via `QFontDatabase.addApplicationFont`, and TTF / OTF download export buttons.
+
+---
+
+## 15. Handwritten Document & Searchable PDF Generation (Step 4)
+
+### Overview
+Verbum Step 4 compiles arbitrary multi-page user text into standardized, high-fidelity PDF documents that visually reproduce the personal handwriting style while remaining 100% digital, searchable, and selectable.
+
+### Document Engine Architecture (`app/pdf_generator.py`)
+1. **True Vector Font Embedding**:
+   - Registers `Verbum_Handwriting.ttf` with ReportLab's `pdfmetrics.registerFont(TTFont('VerbumHandwriting', ttf_path))`.
+   - Generates TrueType font subset embedded directly into the PDF (`AAAAAA+VerbumHandwriting-Regular`).
+   - Zero raster page screenshots: all text remains crisp vector paths at 1000% zoom and selectable in any PDF viewer (Acrobat, Edge, Chrome, Preview).
+2. **Flowable Multi-Page Layout**:
+   - `SimpleDocTemplate` with 0.75-inch standard margins.
+   - Paragraph styling with proportional leading (28 pt font size, 36 pt leading).
+   - Paragraph separation and page break support (`---` on an isolated line triggers explicit `PageBreak()`).
+3. **Automated Validation & Preview Rendering**:
+   - Programmatically validated using PyMuPDF (`validate_pdf_document`): verifies page count, ensures text streams contain target strings, and confirms embedded font descriptor exists.
+   - Page preview rasterization using PyMuPDF Matrix rendering (`output/test_document_page_1_preview.png`) for live display in the UI.
+4. **Unsupported Glyph Handling**:
+   - Pre-scans content against the font's Unicode `cmap`.
+   - Returns any unmapped characters to the user interface transparently without crashing.
+
+### Multiprocessing & UI Integration
+- **Worker (`app/pdf_worker.py`)**: Subprocess execution for PDF generation and preview rendering.
+- **UI (`CreateFilesPage`)**: Document title field, multiline text editor, "Load sample text" preset button, page count badge, embedded page preview display, "Save PDF As..." file dialog, and "Open PDF" in the default Windows system reader.
+

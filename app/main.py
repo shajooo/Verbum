@@ -4,18 +4,26 @@ import logging
 import multiprocessing as mp
 import os
 import queue
+import shutil
 import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QTimer, Signal, Qt, Slot
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QObject, QTimer, Signal, Qt, Slot, QUrl
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import QApplication, QFileDialog
 
 from .clipboard import copy_text, paste_text
 from .config import Config
 from .hotkey import PushToTalkHotkey
 from .recorder import Recorder
+from .resources import application_output_root, font_dataset_paths
 from .extraction_worker import start_extraction_worker
+from .translation_worker import start_translation_worker
+from .font_worker import start_font_worker
+from .font_intake_worker import start_font_intake_worker
+from .font_projects import FontProjectStore
+from .pdf_worker import start_pdf_worker
 from .worker import start_worker
 from .ui.main_window import MainWindow
 from .ui.recording_overlay import RecordingOverlay
@@ -44,9 +52,17 @@ class VoiceInputApp(QObject):
         # ── Independent feature states ────────────────────────────────────────
         self.voice_state = "IDLE"
         self.extraction_state = "IDLE"
-        # font_state / files_state are placeholders for future backends
+        self.translation_state = "IDLE"
         self.font_state = "IDLE"
         self.files_state = "IDLE"
+        self.font_process = self.font_result_queue = self.font_cancel_event = None
+        self.font_intake_process = self.font_intake_queue = self.font_intake_cancel = None
+        self.font_intake_project_id = ""
+        self.font_generation_project_id = ""
+        self.font_generation_version = 0
+        self.font_projects = FontProjectStore()
+        self.pdf_process = self.pdf_result_queue = self.pdf_cancel_event = None
+        self.last_generated_pdf_path = ""
 
         self.recorder = Recorder(self.config.microphone)
         self.worker = self.command_queue = self.result_queue = None
@@ -57,6 +73,13 @@ class VoiceInputApp(QObject):
         self.settings_window = None
         self.extraction_process = self.extraction_result_queue = self.extraction_cancel_event = None
         self.extraction_source_path = ""
+        self.translation_process = None
+        self.translation_commands = None
+        self.translation_results = None
+        self.translation_cancel_event = None
+        self.pending_translation_request_id = None
+        self._pending_translation_text = ""   # original text saved while worker runs
+        self._translation_job_kind = ""
 
         self.tray = Tray()
         self.tray.show_main.connect(self.show_main)
@@ -75,7 +98,30 @@ class VoiceInputApp(QObject):
         self.main_window.extraction_cancel_requested.connect(self.cancel_extraction)
         self.main_window.extraction_toggled.connect(self.handle_extraction_toggled)
         self.main_window.font_toggled.connect(self.handle_font_toggled)
+        self.main_window.font_generation_requested.connect(self.start_font_generation)
+        self.main_window.font_cancel_requested.connect(self.cancel_font_generation)
+        self.main_window.font_download_ttf_requested.connect(self.download_ttf)
+        self.main_window.font_download_otf_requested.connect(self.download_otf)
+        self.main_window.font_project_create_requested.connect(self.create_font_project)
+        self.main_window.font_project_selected.connect(self.select_font_project)
+        self.main_window.font_generation_selected.connect(self.select_font_generation)
+        self.main_window.font_sample_selected.connect(self.start_font_intake)
+        self.main_window.font_sample_accept_requested.connect(self.accept_font_sample)
+        self.main_window.font_candidate_accept_requested.connect(self.accept_font_candidate)
+        self.main_window.font_sample_review_requested.connect(self.review_font_sample)
+        self.main_window.font_sample_remove_requested.connect(self.remove_font_sample)
+        self.main_window.font_samples_merge_requested.connect(self.merge_font_samples)
+
+        self._refresh_font_projects()
         self.main_window.files_toggled.connect(self.handle_files_toggled)
+        self.main_window.pdf_generation_requested.connect(self.start_pdf_generation)
+        self.main_window.pdf_cancel_requested.connect(self.cancel_pdf_generation)
+        self.main_window.pdf_download_requested.connect(self.download_pdf)
+        self.main_window.pdf_open_requested.connect(self.open_pdf)
+        self.main_window.translation_requested.connect(self.start_translation)
+        self.main_window.translation_cancelled.connect(self.cancel_translation)
+        self.main_window.translation_toggled.connect(self.handle_translation_toggled)
+        self.main_window.translation_setup_requested.connect(self.install_translation_model)
 
         # Audio level bridge — feeds both the overlay and the Capture page waveform
         self.audio_level_bridge = AudioLevelBridge(self)
@@ -101,10 +147,14 @@ class VoiceInputApp(QObject):
 
         self.ensure_worker()
 
-        # Single polling timer — polls both voice worker and extraction worker
+        # Single polling timer — polls voice worker, extraction worker, translation, font, and pdf workers
         self.timer = QTimer()
         self.timer.timeout.connect(self.poll_worker)
         self.timer.timeout.connect(self.poll_extraction)
+        self.timer.timeout.connect(self.poll_translation)
+        self.timer.timeout.connect(self.poll_font)
+        self.timer.timeout.connect(self.poll_font_intake)
+        self.timer.timeout.connect(self.poll_pdf)
         self.timer.start(100)
 
     # ── Voice state ───────────────────────────────────────────────────────────
@@ -305,19 +355,668 @@ class VoiceInputApp(QObject):
         if not enabled and self.extraction_process:
             self.cancel_extraction()
 
+    # ── Translation worker management ────────────────────────────────────────────
+
+    def ensure_translation_worker(self) -> None:
+        """Start long-running translation worker if not already running."""
+        if self.translation_process is not None and self.translation_process.is_alive():
+            return
+        self.finish_translation_worker(terminate=True)
+        try:
+            self.translation_process, self.translation_commands, self.translation_results, self.translation_cancel_event = \
+                start_translation_worker()
+            logging.info("Persistent translation worker process started (pid=%s)", self.translation_process.pid)
+        except Exception as exc:
+            logging.exception("Failed to start translation worker process")
+            self.main_window.show_translation_error(f"Could not initialize translation service: {exc}")
+
+    @Slot(str, str)
+    def start_translation(self, text: str, source_lang: str) -> None:
+        """Submit a translation job to the persistent worker process."""
+        if not self.config.enable_translation:
+            self.main_window.show_translation_error("Enable Translation to use this feature.")
+            return
+        if self.translation_state != "IDLE":
+            return
+        text = text.strip()
+        if not text:
+            self.main_window.show_translation_error("Input text cannot be empty.")
+            return
+
+        self.ensure_translation_worker()
+        if not self.translation_process or not self.translation_commands:
+            self.main_window.show_translation_error("Translation service is currently unavailable.")
+            return
+
+        import uuid
+        req_id = str(uuid.uuid4())
+        self.pending_translation_request_id = req_id
+        self._pending_translation_text = text
+        self._translation_job_kind = "translation"
+        if self.translation_cancel_event:
+            self.translation_cancel_event.clear()
+
+        self.translation_state = "RUNNING"
+        if source_lang == "auto":
+            self.main_window.update_translation_status("detecting", "Preparing language detection…")
+        else:
+            self.main_window.update_translation_status("loading", "Preparing translation…")
+        self.translation_commands.put(("translate", req_id, text, source_lang))
+        logging.info("Submitted translation job (req_id=%s, lang=%s, length=%d)", req_id, source_lang, len(text))
+
+    @Slot()
+    def install_translation_model(self) -> None:
+        """Run an explicit, user-initiated one-time local model setup."""
+        if not self.config.enable_translation or self.translation_state != "IDLE":
+            return
+        self.ensure_translation_worker()
+        if not self.translation_process or not self.translation_commands:
+            self.main_window.show_translation_error("Translation service is currently unavailable.")
+            return
+        import uuid
+        req_id = str(uuid.uuid4())
+        self.pending_translation_request_id = req_id
+        self._translation_job_kind = "install"
+        self.translation_state = "RUNNING"
+        self.translation_commands.put(("install", req_id))
+        logging.info("Submitted explicit translation model setup (req_id=%s)", req_id)
+
+    def poll_translation(self) -> None:
+        """Poll translation result queue (runs every 100 ms on main timer)."""
+        process, results = self.translation_process, self.translation_results
+        if not process or not results:
+            return
+        try:
+            message = results.get_nowait()
+        except queue.Empty:
+            if self.translation_state == "RUNNING" and not process.is_alive():
+                self.finish_translation_worker()
+                self.translation_state = "IDLE"
+                self.pending_translation_request_id = None
+                self.main_window.show_translation_error("The translation worker stopped unexpectedly.")
+            return
+
+        kind = message[0]
+        req_id = message[1] if len(message) > 1 else ""
+
+        # Ignore results from cancelled / stale requests
+        if req_id != self.pending_translation_request_id:
+            return
+
+        if kind == "status":
+            status_kind = message[2] if len(message) > 2 else ""
+            detail = message[3] if len(message) > 3 else ""
+            self.main_window.update_translation_status(status_kind, detail)
+            return
+
+        # Final result received
+        self.translation_state = "IDLE"
+        self.pending_translation_request_id = None
+
+        if kind == "result":
+            outcome = message[2] if len(message) > 2 else ""
+            if outcome == "ok":
+                translated = message[3]
+                source_lang = message[4]
+                source_name = message[5]
+                original = self._pending_translation_text
+                self._pending_translation_text = ""
+                # Persist to history
+                self.config.add_translation_history(
+                    original=original,
+                    translated=translated,
+                    source_lang=source_lang,
+                    source_name=source_name,
+                )
+                # Persist source language preference if in manual mode
+                if self.config.translation_detect_mode == "manual":
+                    self.config.translation_source_lang = source_lang
+                    self.config.save()
+                # Update UI
+                self.main_window.show_translation_result(original, translated, source_lang, source_name)
+                self.main_window.translate_page.populate_history(
+                    self.config.translation_history,
+                    self.main_window.copy_requested.emit,
+                )
+                self._translation_job_kind = ""
+                logging.info("Translation complete: %s → English (%d chars)", source_name, len(translated))
+            elif outcome == "installed":
+                self._translation_job_kind = ""
+                self.main_window.translate_page.show_model_installed()
+                logging.info("Translation model setup complete")
+            elif outcome == "model_missing":
+                self._translation_job_kind = ""
+                self._pending_translation_text = ""
+                err = message[3] if len(message) > 3 else "Translation model is not installed."
+                self.main_window.translate_page.show_model_missing(err)
+            elif outcome == "cancelled":
+                self._pending_translation_text = ""
+                self._translation_job_kind = ""
+                self.main_window.show_translation_cancelled()
+            else:
+                err = message[3] if len(message) > 3 else "Translation failed."
+                if len(message) > 5:
+                    logging.error(
+                        "Translation setup failure [%s]:\n%s",
+                        message[4], message[5],
+                    )
+                self._pending_translation_text = ""
+                self._translation_job_kind = ""
+                self.main_window.show_translation_error(err)
+                logging.error("Translation error: %s", err)
+
+    @Slot()
+    def cancel_translation(self) -> None:
+        """Cancel an in-flight job and retire its isolated worker safely.
+
+        Retiring the process avoids a shared cancellation-event race where a
+        newly submitted job could clear the event before the old inference has
+        observed it. The next translation lazily starts one fresh worker.
+        """
+        if self.translation_cancel_event:
+            self.translation_cancel_event.set()
+        self.finish_translation_worker(terminate=True)
+        self._pending_translation_text = ""
+        self.translation_state = "IDLE"
+        self.main_window.show_translation_cancelled()
+
+    def finish_translation_worker(self, terminate: bool = False) -> None:
+        process = self.translation_process
+        if process:
+            if not terminate and self.translation_commands:
+                try:
+                    self.translation_commands.put(("shutdown",))
+                except Exception:
+                    pass
+            if terminate and process.is_alive():
+                process.terminate()
+            process.join(timeout=1)
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=1)
+        self.translation_process = None
+        self.translation_commands = None
+        self.translation_results = None
+        self.translation_cancel_event = None
+        self.pending_translation_request_id = None
+        self._translation_job_kind = ""
+
+    @Slot(bool)
+    def handle_translation_toggled(self, enabled: bool) -> None:
+        """Handle Translation feature toggle."""
+        self.config.enable_translation = enabled
+        self.config.save()
+        logging.info("Translation feature toggled: %s", enabled)
+        if not enabled:
+            if self.translation_state == "RUNNING":
+                self.cancel_translation()
+            self.finish_translation_worker(terminate=True)
+
+    # Phase 1 font-project intake
+    def _refresh_font_projects(self) -> None:
+        # Keep the bundled verified starter project self-healing across PyInstaller
+        # rebuilds, because its read-only resources live under the current bundle's
+        # _internal directory.
+        self.font_projects.ensure_legacy_project()
+        projects = self.font_projects.list_projects()
+        active = self.config.active_font_project_id
+        if not any(item["project_id"] == active for item in projects):
+            active = projects[0]["project_id"]
+            self.config.active_font_project_id = active
+            self.config.save()
+        self.main_window.set_font_projects(projects, active)
+        entries = self.font_projects.entries(active)
+        summary = {state: sum(1 for entry in entries if entry.get("review_status") == state)
+                   for state in ("GOOD", "REVIEW", "REJECT")}
+        chars = {str(entry.get("char", "")) for entry in entries if entry.get("char")}
+        coverage = {
+            "upper": sum(1 for char in chars if len(char) == 1 and char.isascii() and char.isupper()),
+            "lower": sum(1 for char in chars if len(char) == 1 and char.isascii() and char.islower()),
+            "numbers": sum(1 for char in chars if len(char) == 1 and char.isdigit()),
+            "punctuation": sum(1 for char in chars if len(char) == 1 and not char.isalnum() and not char.isspace()),
+        }
+        self.main_window.set_font_project_statistics(len(entries), summary, coverage)
+        self.main_window.set_font_project_samples(
+            self.font_projects.get(active), self.font_projects.staged_samples(active),
+        )
+        history = self.font_projects.generation_history(active)
+        self.main_window.set_font_project_generation(
+            self.font_projects.latest_generation(active), history)
+        self.main_window.font_page.populate_history(
+            [f"v{item['version']:03d} — {item.get('glyph_count', 0)} glyphs" for item in history],
+            self.main_window.copy_requested.emit,
+        )
+
+    @Slot(str)
+    def create_font_project(self, name: str) -> None:
+        try:
+            created = self.font_projects.create(name)
+            self.config.active_font_project_id = created["project_id"]
+            self.config.save()
+            self._refresh_font_projects()
+        except Exception as exc:
+            self.main_window.show_font_intake_error(str(exc))
+
+    @Slot(str)
+    def select_font_project(self, project_id: str) -> None:
+        try:
+            self.font_projects.project_root(project_id)
+            self.config.active_font_project_id = project_id
+            self.config.save()
+            self._refresh_font_projects()
+        except Exception as exc:
+            self.main_window.show_font_intake_error(str(exc))
+
+    @Slot(int)
+    def select_font_generation(self, version: int) -> None:
+        """Select an immutable generated version from the active project only."""
+        project_id = self.config.active_font_project_id
+        try:
+            record = self.font_projects.validated_generation(project_id, version)
+            if record is None:
+                raise ValueError("The selected generated font version is unavailable.")
+            self.main_window.set_font_project_generation(
+                record, self.font_projects.generation_history(project_id))
+        except Exception as exc:
+            self.main_window.show_font_error(str(exc))
+
+    @Slot(str)
+    def start_font_intake(self, path: str) -> None:
+        project_id = self.config.active_font_project_id
+        if not project_id:
+            self.main_window.show_font_intake_error("Create a font project before adding handwriting samples.")
+            return
+        if self.font_intake_process and self.font_intake_process.is_alive():
+            self.main_window.show_font_intake_error("A handwriting sample is already being analyzed.")
+            return
+        try:
+            self.main_window.show_font_intake_progress("Copying sample into the active project…")
+            self.font_intake_process, self.font_intake_queue, self.font_intake_cancel = start_font_intake_worker(project_id, path)
+            self.font_intake_project_id = project_id
+        except Exception as exc:
+            self.main_window.show_font_intake_error(f"Could not start sample analysis: {exc}")
+
+    def poll_font_intake(self) -> None:
+        if not self.font_intake_queue:
+            return
+        try:
+            kind, payload = self.font_intake_queue.get_nowait()
+        except queue.Empty:
+            return
+        if kind == "progress":
+            self.main_window.show_font_intake_progress(payload["message"])
+            return
+        process = self.font_intake_process
+        if process:
+            process.join(timeout=0.2)
+        self.font_intake_process = self.font_intake_queue = self.font_intake_cancel = None
+        if kind == "complete":
+            result = payload["result"]
+            if result.get("project_id") == self.font_intake_project_id and result.get("status") == "IMPORTED":
+                # The note worker has already committed glyphs to the captured project.
+                # Refresh the currently selected project so the dataset badges and
+                # counts update immediately without ever mixing project state.
+                self._refresh_font_projects()
+            if result.get("project_id") != self.font_intake_project_id:
+                self.main_window.show_font_intake_error("Project mismatch: this sample belongs to another font project.")
+            elif result.get("project_id") != self.config.active_font_project_id:
+                # A job retains the ID captured when it started.  Do not render
+                # its result into a project selected while it was running.
+                self._refresh_font_projects()
+            else:
+                self.main_window.show_font_intake_result(result)
+        else:
+            self.main_window.show_font_intake_error(payload.get("message", "Sample analysis failed."))
+
+    @Slot(str, str)
+    def accept_font_sample(self, sample_id: str, character: str) -> None:
+        try:
+            entry = self.font_projects.accept_isolated_sample(self.config.active_font_project_id, sample_id, character)
+            self.main_window.show_font_sample_accepted(entry)
+            self._refresh_font_projects()
+        except Exception as exc:
+            self.main_window.show_font_intake_error(str(exc))
+
+    @Slot(str, str)
+    def accept_font_candidate(self, sample_id: str, candidate_id: str) -> None:
+        try:
+            entry = self.font_projects.accept_candidate(
+                self.config.active_font_project_id, sample_id, candidate_id,
+            )
+            self.main_window.show_font_sample_accepted(entry)
+            self._refresh_font_projects()
+        except Exception as exc:
+            self.main_window.show_font_intake_error(str(exc))
+
+    @Slot(str)
+    def review_font_sample(self, sample_id: str) -> None:
+        try:
+            self.font_projects.review_sample(self.config.active_font_project_id, sample_id)
+            self._refresh_font_projects()
+        except Exception as exc:
+            self.main_window.show_font_intake_error(str(exc))
+
+    @Slot(str)
+    def remove_font_sample(self, sample_id: str) -> None:
+        try:
+            self.font_projects.remove_staged_sample(self.config.active_font_project_id, sample_id)
+            self._refresh_font_projects()
+        except Exception as exc:
+            self.main_window.show_font_intake_error(str(exc))
+
+    @Slot()
+    def merge_font_samples(self) -> None:
+        try:
+            count = self.font_projects.merge_accepted_samples(self.config.active_font_project_id)
+            self.main_window.show_font_samples_merged(count)
+            self._refresh_font_projects()
+        except Exception as exc:
+            self.main_window.show_font_intake_error(str(exc))
+
+    # ── Font generation backend ───────────────────────────────────────────────
+
+    @Slot()
+    def start_font_generation(self) -> None:
+        if not self.config.enable_font:
+            self.main_window.show_font_error("Enable Create Font to generate your handwriting font.")
+            return
+        if self.font_state != "IDLE":
+            return
+        self.finish_font_worker(terminate=True)
+        project_id = self.config.active_font_project_id
+        try:
+            project = self.font_projects.get(project_id)
+            manifest_path, glyphs_dir = self.font_projects.dataset_paths(project_id)
+            output_dir, version = self.font_projects.generation_directory(project_id)
+        except Exception as exc:
+            self.main_window.show_font_error(str(exc))
+            return
+
+        try:
+            self.font_process, self.font_result_queue, self.font_cancel_event = start_font_worker(
+                manifest_path=str(manifest_path),
+                glyphs_dir=str(glyphs_dir),
+                output_dir=str(output_dir),
+                font_name=project["project_name"],
+                build_otf=True,
+            )
+            self.font_state = "GENERATING"
+            self.font_generation_project_id = project_id
+            self.font_generation_version = version
+            self.main_window.update_font_status("Starting font generator...", 0.05)
+            logging.info("Started font generation worker process (pid=%s)", self.font_process.pid)
+        except Exception as exc:
+            logging.exception("Failed to start font worker")
+            self.main_window.show_font_error(f"Could not start font generator: {exc}")
+
+    @Slot()
+    def cancel_font_generation(self) -> None:
+        if self.font_cancel_event:
+            self.font_cancel_event.set()
+        self.finish_font_worker(terminate=True)
+        if self.font_generation_project_id and self.font_generation_version:
+            self.font_projects.discard_generation_directory(
+                self.font_generation_project_id, self.font_generation_version)
+        self.font_state = "IDLE"
+        self.main_window.show_font_cancelled()
+        logging.info("Font generation was cancelled by user")
+
+    def poll_font(self) -> None:
+        process, results = self.font_process, self.font_result_queue
+        if not process or not results:
+            return
+        try:
+            message = results.get_nowait()
+        except queue.Empty:
+            if self.font_state == "GENERATING" and not process.is_alive():
+                self.finish_font_worker()
+                self.font_state = "IDLE"
+                self.main_window.show_font_error("The font generator process stopped unexpectedly.")
+            return
+
+        kind = message[0]
+        if kind == "progress":
+            msg, pct = message[1], message[2]
+            self.main_window.update_font_status(msg, pct)
+            return
+
+        self.finish_font_worker()
+        self.font_state = "IDLE"
+
+        if kind == "cancelled":
+            self.font_projects.discard_generation_directory(
+                self.font_generation_project_id, self.font_generation_version)
+            self.main_window.show_font_cancelled()
+        elif kind == "error":
+            self.font_projects.discard_generation_directory(
+                self.font_generation_project_id, self.font_generation_version)
+            err = message[1]
+            self.main_window.show_font_error(err)
+            logging.error("Font generation error: %s", err)
+        elif kind == "success":
+            data = message[1]
+            data.update({"project_id": self.font_generation_project_id, "version": self.font_generation_version})
+            self.font_projects.record_generation(self.font_generation_project_id, data)
+            self._refresh_font_projects()
+            if self.config.active_font_project_id == self.font_generation_project_id:
+                self.main_window.show_font_result(data)
+            count = data.get("glyph_count", 0)
+            import datetime
+            ts_str = datetime.datetime.now().strftime("%b %d, %H:%M")
+            entry = f"{self.font_generation_project_id} v{self.font_generation_version:03d} ({count} glyphs) - {ts_str}"
+            # Font history is deliberately project-local; global history is not
+            # used for generated-font records.
+            logging.info("Font generation completed successfully: %s", entry)
+
+    @Slot()
+    def download_ttf(self) -> None:
+        ttf_path = Path(self.main_window.font_page._ttf_path or "")
+        if not ttf_path.exists():
+            self.main_window.show_font_error("Font has not been generated yet.")
+            return
+        dest, _ = QFileDialog.getSaveFileName(
+            self.main_window, "Save Handwriting Font (TTF)", ttf_path.name, "TrueType Fonts (*.ttf)")
+        if dest:
+            try:
+                shutil.copy2(str(ttf_path), dest)
+                logging.info("Exported TTF font to %s", dest)
+            except Exception as exc:
+                self.main_window.show_font_error(f"Failed to save TTF font: {exc}")
+
+    @Slot()
+    def download_otf(self) -> None:
+        otf_path = Path(self.main_window.font_page._otf_path or "")
+        if not otf_path.exists():
+            self.main_window.show_font_error("OTF font has not been generated yet.")
+            return
+        dest, _ = QFileDialog.getSaveFileName(
+            self.main_window, "Save Handwriting Font (OTF)", otf_path.name, "OpenType Fonts (*.otf)")
+        if dest:
+            try:
+                shutil.copy2(str(otf_path), dest)
+                logging.info("Exported OTF font to %s", dest)
+            except Exception as exc:
+                self.main_window.show_font_error(f"Failed to save OTF font: {exc}")
+
+    def finish_font_worker(self, terminate: bool = False) -> None:
+        process = self.font_process
+        if process:
+            if terminate and process.is_alive():
+                process.terminate()
+            process.join(timeout=1)
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=1)
+        self.font_process = self.font_result_queue = self.font_cancel_event = None
+
     @Slot(bool)
     def handle_font_toggled(self, enabled: bool) -> None:
-        """Future: initialize/teardown font generation backend."""
         self.config.enable_font = enabled
         self.config.save()
         logging.info("Create Font feature toggled: %s", enabled)
+        if not enabled and self.font_state == "GENERATING":
+            self.cancel_font_generation()
+
+    # ── PDF generation backend ────────────────────────────────────────────────
+
+    @Slot(str, str, str, object)
+    def start_pdf_generation(self, title: str, content: str, selected_font_path: str = "", html_pages: list[str] | None = None) -> None:
+        if not self.config.enable_files:
+            self.main_window.show_pdf_error("Enable Create Files to generate PDF documents.")
+            return
+        if self.files_state != "IDLE":
+            return
+
+        font_path = Path(selected_font_path).resolve() if selected_font_path else None
+        if font_path is None and not html_pages:
+            legacy_font = (application_output_root() / "fonts" / "Verbum_Handwriting.ttf").resolve()
+            font_path = legacy_font if legacy_font.is_file() else None
+        if selected_font_path and (font_path is None or not font_path.is_file()):
+            self.main_window.show_pdf_error("The selected handwriting font is missing. Choose a valid generated font version.")
+            return
+        if selected_font_path:
+            try:
+                matched = False
+                for project in self.font_projects.list_projects():
+                    project_id = project.get("project_id", "")
+                    for record in self.font_projects.generation_history(project_id):
+                        version = int(record.get("version", 0))
+                        validated = self.font_projects.validated_generation(project_id, version)
+                        if validated:
+                            for key in ("ttf_path", "otf_path"):
+                                raw_p = validated.get(key)
+                                if raw_p and Path(raw_p).resolve() == font_path:
+                                    matched = True
+                                    break
+                        if matched:
+                            break
+                    if matched:
+                        break
+                if not matched:
+                    raise ValueError("Selected font is not a validated artifact of a known font project/version.")
+            except Exception as exc:
+                self.main_window.show_pdf_error(f"Personal font project validation failed: {exc}")
+                return
+
+        self.finish_pdf_worker(terminate=True)
+        output_dir = application_output_root() / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        safe_title = "".join(c for c in title if c.isalnum() or c in ("-", "_")).strip() or "handwritten_document"
+        out_pdf = str(output_dir / f"{safe_title}.pdf")
+
+        try:
+            self.pdf_process, self.pdf_result_queue, self.pdf_cancel_event = start_pdf_worker(
+                content=content,
+                title=title,
+                font_path=str(font_path) if font_path else "",
+                output_pdf_path=out_pdf,
+                page_size="letter",
+                html_pages=html_pages,
+            )
+            self.files_state = "GENERATING"
+            self.main_window.update_pdf_status("Initializing document layout...", 0.1)
+            logging.info("Started PDF generation worker process (pid=%s)", self.pdf_process.pid)
+        except Exception as exc:
+            logging.exception("Failed to start PDF worker")
+            self.main_window.show_pdf_error(f"Could not start PDF generator: {exc}")
+
+    @Slot()
+    def cancel_pdf_generation(self) -> None:
+        if self.pdf_cancel_event:
+            self.pdf_cancel_event.set()
+        self.finish_pdf_worker(terminate=True)
+        self.files_state = "IDLE"
+        self.main_window.show_pdf_cancelled()
+        logging.info("PDF generation was cancelled by user")
+
+    def poll_pdf(self) -> None:
+        process, results = self.pdf_process, self.pdf_result_queue
+        if not process or not results:
+            return
+        try:
+            message = results.get_nowait()
+        except queue.Empty:
+            if self.files_state == "GENERATING" and not process.is_alive():
+                self.finish_pdf_worker()
+                self.files_state = "IDLE"
+                self.main_window.show_pdf_error("The PDF generator process stopped unexpectedly.")
+            return
+
+        kind = message[0]
+        if kind == "progress":
+            msg, pct = message[1], message[2]
+            self.main_window.update_pdf_status(msg, pct)
+            return
+
+        self.finish_pdf_worker()
+        self.files_state = "IDLE"
+
+        if kind == "cancelled":
+            self.main_window.show_pdf_cancelled()
+        elif kind == "error":
+            err = message[1]
+            self.main_window.show_pdf_error(err)
+            logging.error("PDF generation error: %s", err)
+        elif kind == "success":
+            data = message[1]
+            self.last_generated_pdf_path = data.get("pdf_path", "")
+            self.main_window.show_pdf_result(data)
+            pages = data.get("page_count", 1)
+            pdf_name = Path(self.last_generated_pdf_path).name if self.last_generated_pdf_path else "document.pdf"
+            import datetime
+            ts_str = datetime.datetime.now().strftime("%b %d, %H:%M")
+            entry = f"{pdf_name} ({pages} page{'s' if pages > 1 else ''}) - {ts_str}"
+            self.config.add_files_history(entry)
+            self.main_window.files_page.populate_history(
+                self.config.files_history, self.main_window.copy_requested.emit)
+            logging.info("PDF generation completed successfully: %s", entry)
+
+    @Slot()
+    def download_pdf(self) -> None:
+        pdf_path = self.last_generated_pdf_path or str(application_output_root() / "output" / "test_document.pdf")
+        if not Path(pdf_path).exists():
+            self.main_window.show_pdf_error("PDF document has not been generated yet.")
+            return
+        default_name = Path(pdf_path).name
+        dest, _ = QFileDialog.getSaveFileName(
+            self.main_window, "Save PDF Document", default_name, "PDF Documents (*.pdf)")
+        if dest:
+            try:
+                shutil.copy2(pdf_path, dest)
+                logging.info("Exported PDF document to %s", dest)
+            except Exception as exc:
+                self.main_window.show_pdf_error(f"Failed to save PDF document: {exc}")
+
+    @Slot()
+    def open_pdf(self) -> None:
+        pdf_path = self.last_generated_pdf_path or str(application_output_root() / "output" / "test_document.pdf")
+        if not Path(pdf_path).exists():
+            self.main_window.show_pdf_error("PDF document not found.")
+            return
+        try:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(pdf_path))
+            logging.info("Opened PDF in system viewer: %s", pdf_path)
+        except Exception as exc:
+            self.main_window.show_pdf_error(f"Could not open PDF viewer: {exc}")
+
+    def finish_pdf_worker(self, terminate: bool = False) -> None:
+        process = self.pdf_process
+        if process:
+            if terminate and process.is_alive():
+                process.terminate()
+            process.join(timeout=1)
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=1)
+        self.pdf_process = self.pdf_result_queue = self.pdf_cancel_event = None
 
     @Slot(bool)
     def handle_files_toggled(self, enabled: bool) -> None:
-        """Future: initialize/teardown file generation backend."""
         self.config.enable_files = enabled
         self.config.save()
         logging.info("Create Files feature toggled: %s", enabled)
+        if not enabled and self.files_state == "GENERATING":
+            self.cancel_pdf_generation()
 
     def finish_extraction_worker(self, terminate: bool = False) -> None:
         process = self.extraction_process
@@ -470,6 +1169,9 @@ class VoiceInputApp(QObject):
             self.recorder.stop()
         self.overlay.hide_overlay()
         self.finish_extraction_worker(terminate=True)
+        self.finish_translation_worker(terminate=True)
+        self.finish_font_worker(terminate=True)
+        self.finish_pdf_worker(terminate=True)
         self.finish_worker()
         self.app.quit()
 

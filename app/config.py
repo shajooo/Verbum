@@ -16,12 +16,18 @@ DEFAULTS = {
     "extraction_history": [],
     "font_history": [],
     "files_history": [],
+    "translation_history": [],  # list of {ts, source_lang, source_name, original, translated}
     # Feature toggles
     "enable_extraction": True,
     "enable_font": False,
     "enable_files": False,
+    "enable_translation": False,
+    # Translation preferences
+    "translation_detect_mode": "auto",   # "auto" | "manual"
+    "translation_source_lang": "fr",     # ISO code used in manual mode
     # UI state
     "sidebar_collapsed": False,
+    "active_font_project_id": "",
     # Legacy: keep for backwards compat — maps to voice_history on load
     "recent_transcriptions": [],
 }
@@ -52,10 +58,15 @@ class Config:
     extraction_history: list
     font_history: list
     files_history: list
+    translation_history: list
     enable_extraction: bool
     enable_font: bool
     enable_files: bool
+    enable_translation: bool
+    translation_detect_mode: str
+    translation_source_lang: str
     sidebar_collapsed: bool
+    active_font_project_id: str
     # Legacy field kept for JSON compat
     recent_transcriptions: list
 
@@ -99,6 +110,19 @@ class Config:
 
     def add_files_history(self, entry: str) -> None:
         self.files_history = [entry, *self.files_history][:5]
+        self.save()
+
+    def add_translation_history(self, original: str, translated: str,
+                                source_lang: str, source_name: str) -> None:
+        import datetime
+        entry = {
+            "ts": datetime.datetime.now().isoformat(timespec="seconds"),
+            "source_lang": source_lang,
+            "source_name": source_name,
+            "original": original,
+            "translated": translated,
+        }
+        self.translation_history = [entry, *self.translation_history][:10]
         self.save()
 
     # Legacy helper — kept so old call-sites still compile

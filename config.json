@@ -17,9 +17,14 @@
   "extraction_history": [],
   "font_history": [],
   "files_history": [],
+  "translation_history": [],
   "enable_extraction": true,
   "enable_font": false,
   "enable_files": false,
-  "sidebar_collapsed": true,
+  "enable_translation": false,
+  "translation_detect_mode": "auto",
+  "translation_source_lang": "fr",
+  "sidebar_collapsed": false,
+  "active_font_project_id": "",
   "recent_transcriptions": []
 }

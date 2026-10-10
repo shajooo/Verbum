@@ -126,5 +126,26 @@ def icon(name: str, color: str = "#aeb6cf", size: int = 20) -> QIcon:
         painter.drawPath(path)
         painter.drawLine(QPointF(size * .20, size * .84), QPointF(size * .80, size * .84))
 
+    elif name == "translate":
+        # Two stacked curved arrows suggesting bidirectional translation
+        # Top arrow: left to right
+        path = QPainterPath(QPointF(size * .18, size * .36))
+        path.cubicTo(size * .18, size * .22, size * .82, size * .22, size * .82, size * .36)
+        painter.drawPath(path)
+        # Arrowhead right
+        arr1 = QPainterPath(QPointF(size * .68, size * .26))
+        arr1.lineTo(QPointF(size * .82, size * .36))
+        arr1.lineTo(QPointF(size * .70, size * .47))
+        painter.drawPath(arr1)
+        # Bottom arrow: right to left
+        path2 = QPainterPath(QPointF(size * .82, size * .64))
+        path2.cubicTo(size * .82, size * .78, size * .18, size * .78, size * .18, size * .64)
+        painter.drawPath(path2)
+        # Arrowhead left
+        arr2 = QPainterPath(QPointF(size * .32, size * .74))
+        arr2.lineTo(QPointF(size * .18, size * .64))
+        arr2.lineTo(QPointF(size * .30, size * .53))
+        painter.drawPath(arr2)
+
     painter.end()
     return QIcon(pixmap)

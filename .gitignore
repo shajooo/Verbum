@@ -30,6 +30,7 @@ logs/
 *.log
 
 # Caches and test artifacts
+models/
 .pytest_cache/
 .coverage
 htmlcov/

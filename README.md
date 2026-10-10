@@ -18,6 +18,12 @@ Voice Input opens to a desktop control centre. Closing that window hides it to t
 
 Whisper starts loading as soon as you begin a recording and remains loaded in a background worker for later recordings. If model loading, transcription, or the worker fails, the app shows an error instead of waiting indefinitely.
 
+## Local translation
+
+The **Translate** page translates supported source languages into English entirely on-device. It uses the MIT-licensed Meta `facebook/m2m100_418M` model in a CTranslate2 int8 cache and the local `langdetect` package for language identification. The installed model cache is about 473 MiB (495,891,833 bytes in the current development cache); it is excluded from Git.
+
+If the model is absent, select **Install model** explicitly on the Translate page. That one-time setup is the only translation path that contacts the model host. A normal Translate action never downloads anything and works offline after setup. Turning Translation off terminates its worker and releases the warm model.
+
 ## Build
 
 ```powershell
@@ -25,3 +31,57 @@ Whisper starts loading as soon as you begin a recording and remains loaded in a 
 ```
 
 The executable will be at `dist\VoiceInput\VoiceInput.exe`.
+
+## Handwriting Glyph Extraction Pipeline (Step 2)
+
+Verbum includes a high-precision computer vision toolchain for extracting, cleaning, and normalizing handwritten character datasets from photographed grid sheets into standard 128×128 grayscale glyphs.
+
+### Extract All Glyphs
+
+Extract all characters across all 6 raw handwriting sheets, score quality, and automatically generate visual QA contact sheets and manifests:
+
+```powershell
+.\.venv\Scripts\python.exe tools/extract_glyphs.py --all
+```
+
+Or extract a specific sheet:
+```powershell
+.\.venv\Scripts\python.exe tools/extract_glyphs.py --sheet media_1791224864942.jpg
+```
+
+### Visual Grid Inspection
+
+Render detected cell lattices, row/column boundaries, and character mappings over the rectified input images:
+
+```powershell
+.\.venv\Scripts\python.exe tools/inspect_grid.py --all
+```
+Outputs are saved to `dataset/processed/debug_inspect/grid_inspect_*.png`.
+
+### Generate QA Contact Sheets
+
+Build categorized visual audit grids and a flagged review sheet:
+
+```powershell
+.\.venv\Scripts\python.exe tools/build_contact_sheet.py
+```
+Outputs are saved to `dataset/review/`:
+- `contact_sheet_uppercase.png` (26 characters × 14 variations)
+- `contact_sheet_lowercase.png` (26 characters × 14 variations)
+- `contact_sheet_numbers.png` (10 digits × 14 variations)
+- `contact_sheet_punctuation.png` (7 symbols × 14 variations)
+- `contact_sheet_flagged_review.png` (Audit sheet of low-contrast or blurred samples)
+
+### Empirical Method Benchmark
+
+Run benchmark comparisons between thresholding, grid detection, and suppression algorithms:
+
+```powershell
+.\.venv\Scripts\python.exe tools/eval_methods.py
+```
+
+### Run Extraction Unit Tests
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_glyph_extraction.py
+```
