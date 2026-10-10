@@ -1,0 +1,12 @@
+{
+  "version": "2.0.0",
+  "project_id": "test_ec0e8f7e",
+  "pipeline": "Verbum-Phase1-Staging",
+  "total_glyphs": 0,
+  "summary": {
+    "GOOD": 0,
+    "REVIEW": 0,
+    "REJECT": 0
+  },
+  "entries": []
+}

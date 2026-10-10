@@ -1,0 +1,9 @@
+{
+  "project_id": "legacy_verified_dataset_f0d4693e",
+  "project_name": "Legacy verified dataset",
+  "created_at": "2026-10-08T16:15:26+00:00",
+  "schema_version": 1,
+  "legacy_read_only": true,
+  "legacy_dataset_root": "C:\\Projects\\Transcriber\\dist\\VoiceInput\\_internal\\dataset\\glyphs",
+  "legacy_manifest": "C:\\Projects\\Transcriber\\dist\\VoiceInput\\_internal\\metadata\\glyph_manifest.json"
+}

@@ -1,0 +1,18 @@
+{
+  "sample_id": "3f4a3815a64541aaa3f7337de12290c5",
+  "project_id": "test_ec0e8f7e",
+  "file_name": "test1.jpeg",
+  "file_size": 63166,
+  "source_path": "C:\\Projects\\Transcriber\\dist\\VoiceInput\\font_projects\\test_ec0e8f7e\\dataset\\staging\\uploads\\3f4a3815a64541aaa3f7337de12290c5_test1.jpeg",
+  "sample_type": "HANDWRITTEN_NOTE",
+  "confidence": 0.762,
+  "classification_method": "heuristic_geometry_v1",
+  "status": "REVIEW_REQUESTED",
+  "details": {
+    "components": 1
+  },
+  "created_at": "2026-10-08T16:34:15+00:00",
+  "candidates": [],
+  "message": "Handwritten note detected. Stored separately for future processing.",
+  "review_requested_at": "2026-10-08T16:38:52+00:00"
+}
