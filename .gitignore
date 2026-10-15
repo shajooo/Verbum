@@ -1,0 +1,38 @@
+
+# JavaScript dependencies
+node_modules/
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Build outputs and packaged dependencies
+dist/
+build/
+out/
+release/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Editor and operating system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak

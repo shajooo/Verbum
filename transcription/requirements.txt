@@ -1,0 +1,8 @@
+# Verbum - Speech-to-Text Transcription Service Requirements
+faster-whisper>=1.0.0
+ctranslate2>=4.0.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+numpy>=2.0.0
+httpx>=0.27.0

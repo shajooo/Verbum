@@ -1,0 +1,1334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Verbum — Speech &amp; Handwriting Workspace</title>
+<style>
+:root{--bg:#f6f5f1;--panel:#fff;--ink:#1d1d1b;--mute:#6b6a65;--line:#e1dfd8;--acc:#2f5d50;--accink:#fff;--warn:#b7791f;--bad:#b3261e;--ok:#2f7d4f;--hl:#fdf0c9;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161715;--panel:#1f211f;--ink:#ecebe6;--mute:#9a9992;--line:#34362f;--acc:#6fb39f;--accink:#10201b;--warn:#e0a84a;--bad:#f2867f;--ok:#6fcf93;--hl:#4a3f1c}}
+:root[data-theme="dark"]{--bg:#161715;--panel:#1f211f;--ink:#ecebe6;--mute:#9a9992;--line:#34362f;--acc:#6fb39f;--accink:#10201b;--warn:#e0a84a;--bad:#f2867f;--ok:#6fcf93;--hl:#4a3f1c}
+*{box-sizing:border-box}html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+.app{display:flex;height:100%}
+nav{width:210px;flex:none;background:var(--panel);border-right:1px solid var(--line);padding:16px 10px;display:flex;flex-direction:column;gap:4px}
+.logo{font:600 20px Georgia,serif;padding:0 10px 14px;letter-spacing:.5px}
+nav button{all:unset;cursor:pointer;padding:9px 10px;border-radius:8px;color:var(--mute);display:flex;gap:8px;align-items:center;position:relative}
+nav button:hover{background:var(--bg)}nav button[aria-selected=true]{background:var(--acc);color:var(--accink)}
+nav button:focus-visible,.btn:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.badge{position:absolute;right:10px;background:var(--warn);color:#fff;border-radius:99px;padding:1px 6px;font-size:11px;font-weight:600}
+nav button[aria-selected=true] .badge{background:var(--accink);color:var(--acc)}
+.sp{flex:1}
+main{flex:1;overflow:auto;padding:24px;min-width:0}
+section{display:none;max-width:920px;margin:0 auto}section.on{display:block}
+h1{font:600 22px Georgia,serif;margin:0 0 4px}.sub{color:var(--mute);margin:0 0 18px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{all:unset;cursor:pointer;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.btn:hover:not([disabled]){border-color:var(--acc)}.btn.p{background:var(--acc);color:var(--accink);border-color:var(--acc)}.btn.p:hover:not([disabled]){opacity:.95}
+.btn.danger{border-color:var(--bad);color:var(--bad)}.btn.danger:hover:not([disabled]){background:var(--bad);color:#fff}
+.btn.rec-active{background:var(--bad);color:#fff;border-color:var(--bad);animation:pulse-red 1.2s infinite alternate}
+@keyframes pulse-red{from{box-shadow:0 0 0 0 rgba(179,38,30,.4)}to{box-shadow:0 0 0 6px rgba(179,38,30,0)}}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+select,input[type=text],input[type=number],textarea{padding:7px 9px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font:inherit}
+.chip{font-size:12px;padding:3px 10px;border-radius:99px;border:1px solid var(--line);color:var(--mute);display:inline-flex;align-items:center;gap:5px}
+.chip.ready{color:var(--ok);border-color:var(--ok)}.chip.load{color:var(--warn);border-color:var(--warn)}.chip.err{color:var(--bad);border-color:var(--bad)}
+.mock{font-size:12px;color:var(--warn)}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:24px;text-align:center;color:var(--mute);cursor:pointer;transition:border-color .2s,background .2s}
+.drop:hover,.drop.over{border-color:var(--acc);background:var(--bg)}
+.bar{height:6px;background:var(--line);border-radius:9px;overflow:hidden;margin-top:10px}.bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .2s}
+.meter{height:6px;width:70px;background:var(--line);border-radius:9px;overflow:hidden;display:inline-block;vertical-align:middle}.meter i{display:block;height:100%;width:0;background:var(--ok);transition:width .05s}
+.out{white-space:pre-wrap;min-height:80px;outline:none;border-radius:6px;padding:4px}
+.out:focus{background:var(--bg)}
+.empty{color:var(--mute);font-style:italic}
+.err{color:var(--bad)}
+.low{background:var(--hl);border-bottom:2px solid var(--warn);border-radius:3px;cursor:help;padding:0 2px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.glyphs{display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:8px}
+.g{border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center;background:var(--panel);cursor:pointer;position:relative}
+.g b{font:34px "Segoe Script","Bradley Hand",cursive;display:block}.g small{color:var(--mute);font-size:11px}
+.g[data-s=ok]{border-color:var(--ok)}.g[data-s=flag]{border-color:var(--warn)}.g[data-s=miss]{border-style:dashed;opacity:.7}
+.g.sel{outline:2px solid var(--acc)}
+.tb{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:12px;position:sticky;top:0;z-index:2}
+.tb .btn{padding:5px 10px}.tb .btn[aria-pressed=true]{background:var(--acc);color:var(--accink)}
+.editor-layout{display:flex;gap:14px;align-items:flex-start}
+.editor-main{flex:1;min-width:0}
+.pending-panel{width:280px;flex:none;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.pending-panel h3{margin:0;font-size:14px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
+.pending-list{display:flex;flex-direction:column;gap:10px;max-height:600px;overflow-y:auto}
+.pending-item{border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--bg);font-size:13px}
+.pending-item .p-meta{font-size:11px;color:var(--mute);margin-bottom:6px;display:flex;justify-content:space-between}
+.pending-item .p-text{margin-bottom:8px;max-height:80px;overflow-y:auto;white-space:pre-wrap}
+.pending-item .p-edit{width:100%;height:60px;font-size:12px;margin-bottom:6px;display:none}
+.pending-item .p-actions{display:flex;gap:6px}
+.pending-item .p-actions .btn{padding:4px 8px;font-size:12px}
+.pagewrap{background:var(--line);padding:18px;border-radius:12px;overflow-x:auto}
+.page{width:640px;max-width:100%;min-height:760px;margin:0 auto;background:#fff;color:#111;padding:60px 56px;box-shadow:0 2px 10px #0003;position:relative;font:16px/1.6 Georgia,serif}
+.page:focus{outline:2px solid var(--acc)}
+canvas.ink{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}canvas.ink.on{pointer-events:auto;cursor:crosshair}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:9px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:99;box-shadow:0 4px 12px #0004}.toast.on{opacity:1}
+/* Settings styles */
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-weight:600;font-size:13px;margin-bottom:4px}
+.form-group .desc{font-size:12px;color:var(--mute);margin-bottom:6px}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)}
+.toggle-row:last-child{border-bottom:none}
+.toggle-info{flex:1;padding-right:16px}
+.toggle-info .t-label{font-weight:600;font-size:14px}
+.toggle-info .t-desc{font-size:12px;color:var(--mute)}
+.switch{position:relative;display:inline-block;width:44px;height:24px;flex:none}
+.switch input{opacity:0;width:0;height:0}
+.slider{position:absolute;cursor:pointer;inset:0;background:var(--line);transition:.2s;border-radius:24px}
+.slider:before{position:absolute;content:"";height:18px;width:18px;left:3px;bottom:3px;background:#fff;transition:.2s;border-radius:50%}
+input:checked + .slider{background:var(--acc)}
+input:checked + .slider:before{transform:translateX(20px)}
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:100;opacity:0;pointer-events:none;transition:opacity .2s}
+.modal-overlay.on{opacity:1;pointer-events:auto}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:24px;max-width:440px;width:90%;box-shadow:0 8px 30px #0004}
+@media (max-width:760px){.app{flex-direction:column}nav{width:100%;flex-direction:row;overflow-x:auto;padding:8px;border-right:0;border-bottom:1px solid var(--line)}.logo,.sp{display:none}nav button{white-space:nowrap}main{padding:14px}.cols,.editor-layout{flex-direction:column;grid-template-columns:1fr}.pending-panel{width:100%}.page{padding:36px 24px}}
+</style>
+</head>
+<body>
+<div class="app">
+<nav role="tablist" aria-label="Sections">
+  <div class="logo">Verbum</div>
+  <button role="tab" aria-selected="true" data-t="tr">🎙 Transcribe</button>
+  <button role="tab" aria-selected="false" data-t="ex">🖼 Extract Text</button>
+  <button role="tab" aria-selected="false" data-t="ft">✍ Create Font</button>
+  <button role="tab" aria-selected="false" data-t="ed">📄 Editor <span class="badge" id="edBadge" hidden>0</span></button>
+  <button role="tab" aria-selected="false" data-t="st">⚙ Settings</button>
+  <div class="sp"></div>
+  <button id="theme" aria-label="Toggle theme">◐ Theme</button>
+</nav>
+<main>
+
+<!-- 1. TRANSCRIBE SECTION -->
+<section id="tr" class="on">
+  <h1>Transcribe</h1>
+  <p class="sub">Whisper speech-to-text. High accuracy local transcription on your NVIDIA GPU.</p>
+  
+  <div class="card">
+    <div class="row">
+      <button class="btn p" id="rec">● Record</button>
+      <button class="btn" id="trUp">Upload audio…</button>
+      <input type="file" id="trFileInput" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg,.opus,.webm,.aac,.wma,.mp4" style="display:none">
+      
+      <label style="display:flex;align-items:center;gap:6px">Model 
+        <select id="trModel">
+          <option value="tiny">tiny (75 MB)</option>
+          <option value="base">base (145 MB)</option>
+          <option value="small" selected>small (480 MB · recommended)</option>
+          <option value="medium">medium (1.5 GB)</option>
+        </select>
+      </label>
+      <span class="chip" id="trChip" aria-live="polite">model: checking…</span>
+    </div>
+
+    <!-- Live Recording Controls -->
+    <div id="recLiveArea" style="display:none;margin-top:14px;padding:12px;background:var(--bg);border-radius:8px">
+      <div class="row" style="justify-content:space-between">
+        <div class="row">
+          <span style="color:var(--bad);font-weight:600">● RECORDING</span>
+          <span id="recTimer" style="font-family:monospace;font-size:16px">00:00</span>
+          <span class="meter" title="Microphone Level"><i id="recLevelBar"></i></span>
+        </div>
+        <button class="btn danger" id="recStopBtn">■ Stop &amp; Transcribe</button>
+      </div>
+    </div>
+
+    <!-- Upload Drop Zone -->
+    <div class="drop" id="trDropZone" style="margin-top:14px" tabindex="0" role="button" aria-label="Upload audio">
+      <span id="trDropText">Drag and drop audio file here (.wav, .mp3, .m4a, .flac, .ogg, .opus), or click to browse</span>
+    </div>
+
+    <!-- Progress Bar & Active Indicators -->
+    <div class="bar" aria-hidden="true" style="margin-top:14px"><i id="trBar"></i></div>
+    
+    <div class="row" style="margin-top:10px;justify-content:space-between">
+      <div class="row">
+        <button class="btn" id="trCancel" disabled>Cancel</button>
+        <span id="trStageText" class="sub" style="margin:0;font-size:13px" aria-live="polite"></span>
+      </div>
+      <div id="trPerfInfo" class="sub" style="margin:0;font-size:12px"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px">Transcript Result (Editable)</label>
+    <div class="out empty" id="trOut" contenteditable="true" aria-live="polite" placeholder="Transcript text will appear here.">No transcript yet. Record or upload audio to begin.</div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="trCopy" disabled>Copy</button>
+      <button class="btn" id="trSend" disabled>Send to Editor</button>
+      <span id="trAutoCopyNotice" class="sub" style="margin:0;font-size:12px;display:none">✓ Copied automatically</span>
+    </div>
+  </div>
+</section>
+
+<!-- 2. EXTRACT TEXT SECTION (Preserved) -->
+<section id="ex">
+  <h1>Extract Text</h1><p class="sub">Printed + handwritten text with contextual correction. <span class="mock">Mock responses.</span></p>
+  <div class="card">
+    <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose image">Drop an image or document here, or click to browse</div>
+    <div class="row" style="margin-top:12px"><span class="chip" id="exChip">engine: unloaded</span><button class="btn p" id="exRun">Run extraction</button><button class="btn" id="exCancel" disabled>Cancel</button></div>
+    <div class="bar" aria-hidden="true"><i id="exBar"></i></div>
+  </div>
+  <div class="cols">
+    <div class="card"><b>Raw recognition</b><div class="out empty" id="exRaw">—</div></div>
+    <div class="card"><b>Corrected</b> <span class="chip">highlighted = review</span><div class="out empty" id="exFix">—</div></div>
+  </div>
+  <div class="row"><button class="btn" id="exSend" disabled>Send to Editor</button></div>
+</section>
+
+<!-- 3. CREATE FONT SECTION (Preserved) -->
+<section id="ft">
+  <h1>Create Font</h1><p class="sub">Review glyphs from a handwriting sample, then generate a font. <span class="mock">Mock glyphs.</span></p>
+  <div class="card row"><button class="btn p" id="ftLoad">Load sample sheet</button><span class="chip" id="ftCount">0 glyphs</span>
+    <span class="chip">✓ approved</span><span class="chip" style="color:var(--warn);border-color:var(--warn)">⚑ needs review</span><span class="chip">╌ missing</span></div>
+  <div class="card"><div class="glyphs" id="glyphs"><div class="empty">No sample loaded.</div></div></div>
+  <div class="card row" id="ftAct" hidden><span id="ftSel">Select a glyph</span><button class="btn" data-a="ok">Approve</button><button class="btn" data-a="flag">Flag</button><button class="btn" data-a="miss">Mark missing</button></div>
+  <div class="row"><button class="btn p" id="ftGen" disabled>Generate test font (.ttf)</button><span id="ftMsg" class="sub" style="margin:0"></span></div>
+</section>
+
+<!-- 4. EDITOR SECTION WITH PENDING APPROVAL LIST -->
+<section id="ed">
+  <h1>Editor</h1><p class="sub">Page-style writing surface with pen &amp; pencil.</p>
+  
+  <div class="tb" role="toolbar" aria-label="Formatting">
+    <select id="edFont" aria-label="Font"><option>Georgia</option><option>Arial</option><option>Courier New</option><option>Segoe Script</option></select>
+    <select id="edSize" aria-label="Size"><option>12</option><option selected>16</option><option>20</option><option>28</option></select>
+    <button class="btn" data-c="bold"><b>B</b></button><button class="btn" data-c="italic"><i>I</i></button><button class="btn" data-c="underline"><u>U</u></button>
+    <button class="btn" data-c="justifyLeft">⇤</button><button class="btn" data-c="justifyCenter">↔</button><button class="btn" data-c="insertUnorderedList">• List</button>
+    <button class="btn" data-c="undo">↶</button><button class="btn" data-c="redo">↷</button>
+    <span style="width:1px;height:22px;background:var(--line)"></span>
+    <button class="btn" id="penBtn" aria-pressed="false">🖊 Pen</button><button class="btn" id="pencilBtn" aria-pressed="false">✏ Pencil</button>
+    <input type="color" id="inkColor" value="#1a2a6c" aria-label="Ink color">
+    <button class="btn" id="clearInk">Clear ink</button>
+  </div>
+
+  <div class="editor-layout">
+    <div class="editor-main">
+      <div class="pagewrap">
+        <div class="page" id="page" contenteditable="true" spellcheck="true">
+          <h2 style="margin-top:0">Untitled document</h2>
+          <p>Start typing here. Use the pen or pencil to sketch over the page.</p>
+          <canvas class="ink" id="ink"></canvas>
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px"><span class="chip" id="edState">saved</span><button class="btn" data-x="DOCX">Export DOCX</button><button class="btn" data-x="PDF">Export PDF</button></div>
+    </div>
+
+    <!-- Step D: Pending from Transcribe Side Panel -->
+    <div class="pending-panel">
+      <h3>
+        <span>Pending Transcripts (<span id="pendingCount">0</span>)</span>
+        <button class="btn" id="pendingApproveAll" style="font-size:11px;padding:2px 6px">Approve All</button>
+      </h3>
+      <p style="font-size:12px;color:var(--mute);margin:0">Transcripts wait here. Nothing enters the document without your review.</p>
+      <div class="pending-list" id="pendingList">
+        <div class="empty" style="font-size:13px">No pending transcripts.</div>
+      </div>
+      <button class="btn danger" id="pendingClearAll" style="font-size:12px;padding:4px;display:none">Clear Queue</button>
+    </div>
+  </div>
+</section>
+
+<!-- 5. SETTINGS SECTION -->
+<section id="st">
+  <h1>Settings</h1>
+  <p class="sub">Configure speech models, hotkeys, microphone, and automatic actions.</p>
+
+  <div class="card">
+    <h3 style="margin-top:0">Speech-to-Text Engine</h3>
+    <div class="cols">
+      <div class="form-group">
+        <label for="stDefaultModel">Default Model</label>
+        <select id="stDefaultModel" style="width:100%">
+          <option value="tiny">tiny (~75 MB)</option>
+          <option value="base">base (~145 MB)</option>
+          <option value="small">small (~480 MB · recommended)</option>
+          <option value="medium">medium (~1.5 GB · GPU int8)</option>
+        </select>
+        <div class="desc">Loaded on first use or startup.</div>
+      </div>
+      <div class="form-group">
+        <label for="stLanguage">Spoken Language</label>
+        <select id="stLanguage" style="width:100%">
+          <option value="auto">Auto-detect</option>
+          <option value="en">English</option>
+          <option value="fr">French</option>
+          <option value="es">Spanish</option>
+          <option value="de">German</option>
+          <option value="it">Italian</option>
+          <option value="pt">Portuguese</option>
+          <option value="zh">Chinese</option>
+          <option value="ja">Japanese</option>
+        </select>
+        <div class="desc">Force a language or let Whisper detect it.</div>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="stPrompt">Vocabulary Hint (Initial Prompt)</label>
+      <input type="text" id="stPrompt" placeholder="e.g. Verbum, PyTorch, CTranslate2, specialized jargon..." style="width:100%">
+      <div class="desc">Optional vocabulary hints to guide Whisper spelling.</div>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="t-label">Use Voice-Activity Detection (VAD) Filter</div>
+        <div class="t-desc">Removes silence and background noise before transcribing. Prevents hallucinated filler.</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="stVad"><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="t-label">Preload Model at Startup</div>
+        <div class="t-desc">Loads the model into VRAM as soon as Verbum launches instead of on first record.</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="stLoadAtStartup"><span class="slider"></span></label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Microphone &amp; Audio</h3>
+    <div class="cols">
+      <div class="form-group">
+        <label for="stMic">Microphone Device</label>
+        <select id="stMic" style="width:100%"><option value="default">Default Device</option></select>
+      </div>
+      <div class="form-group">
+        <label for="stMaxLen">Max Recording Length (minutes)</label>
+        <input type="number" id="stMaxLen" min="1" max="60" value="10" style="width:100%">
+      </div>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="t-label">Play Sound on Start/Stop</div>
+        <div class="t-desc">Plays a subtle audio tone when recording begins and ends.</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="stPlaySound"><span class="slider"></span></label>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="t-label">Delete Temporary Audio Files After Transcription</div>
+        <div class="t-desc">Cleans up local recording WAV files once processed.</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="stDeleteTempAudio"><span class="slider"></span></label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Tray, Global Hotkey &amp; Auto-Paste</h3>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="t-label">Copy Transcript Automatically (Requirement 6)</div>
+        <div class="t-desc">Copies the transcribed text to clipboard immediately. Empty results never overwrite clipboard.</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="stCopyAuto"><span class="slider"></span></label>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="t-label">Automatically Paste into Open Text Input (Requirement 8)</div>
+        <div class="t-desc">Simulates Ctrl+V into whatever application was previously focused. (Note: cannot type into windows running as Administrator unless Verbum is also elevated).</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="stAutoPaste"><span class="slider"></span></label>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="t-label">Keep Running in Tray When Closed (Requirement 7)</div>
+        <div class="t-desc">Closing the window hides it to the system tray so the global hotkey stays active.</div>
+      </div>
+      <label class="switch"><input type="checkbox" id="stKeepTray"><span class="slider"></span></label>
+    </div>
+
+    <div class="form-group" style="margin-top:14px">
+      <label>Global Recording Hotkey</label>
+      <div class="row">
+        <input type="text" id="stHotkey" value="CommandOrControl+Space" readonly style="width:220px">
+        <button class="btn" id="stRebindBtn">Change Shortcut</button>
+      </div>
+      <div class="desc">Press once to start recording from anywhere; press again to stop, transcribe, and copy.</div>
+    </div>
+  </div>
+</section>
+
+</main></div>
+
+<!-- Download Confirmation Modal -->
+<div class="modal-overlay" id="dlModal">
+  <div class="modal">
+    <h3 style="margin-top:0" id="dlTitle">Download Model</h3>
+    <p id="dlDesc" style="color:var(--mute);margin:12px 0 16px"></p>
+    <div class="bar" style="margin-bottom:16px"><i id="dlBar"></i></div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn" id="dlCancelBtn">Cancel</button>
+      <button class="btn p" id="dlConfirmBtn">Download Now</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+let toastT;
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2200)}
+
+// ---------------------------------------------------------------------------
+// Navigation & Theme
+// ---------------------------------------------------------------------------
+function show(id){
+  $$('section').forEach(s=>s.classList.toggle('on',s.id===id));
+  $$('nav [data-t]').forEach(b=>b.setAttribute('aria-selected',b.dataset.t===id));
+}
+$$('nav [data-t]').forEach(b=>b.onclick=()=>show(b.dataset.t));
+$('#theme').onclick=()=>{
+  const r=document.documentElement,d=getComputedStyle(r).getPropertyValue('--bg').trim()==='#161715';
+  r.dataset.theme=d?'light':'dark';
+};
+
+// ---------------------------------------------------------------------------
+// Backend Client & State
+// ---------------------------------------------------------------------------
+let backendInfo = { baseUrl: 'http://127.0.0.1:0', token: '' };
+let appSettings = {};
+let pendingItems = [];
+let installedModels = [];
+let activeJobId = null;
+
+async function apiFetch(endpoint, options = {}) {
+  const url = `${backendInfo.baseUrl}${endpoint}`;
+  const headers = options.headers || {};
+  if (backendInfo.token) {
+    headers['Authorization'] = `Bearer ${backendInfo.token}`;
+  }
+  return fetch(url, { ...options, headers });
+}
+
+// ---------------------------------------------------------------------------
+// Audio Recording via Web Audio & WAV Encoding
+// ---------------------------------------------------------------------------
+let audioCtx = null, mediaStream = null, audioInputNode = null, scriptProcessor = null;
+let recordedPcm = [];
+let recordingStartTime = 0, recordingTimerInterval = null, levelMeterInterval = null;
+let isRecording = false;
+
+function writeString(view, offset, string) {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+}
+
+function floatTo16BitPCM(output, offset, input) {
+  for (let i = 0; i < input.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, input[i]));
+    output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+}
+
+function encodeWavBlob(samples, sampleRate = 16000) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // Mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+
+  floatTo16BitPCM(view, 44, samples);
+  return new Blob([view], { type: 'audio/wav' });
+}
+
+function playBeep(freq = 440, duration = 0.1) {
+  if (!appSettings.playSound) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = freq;
+    gain.gain.value = 0.1;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + duration);
+  } catch(e) {}
+}
+
+async function startRecording(source = 'button') {
+  if (isRecording) return;
+  try {
+    const constraints = {
+      audio: {
+        deviceId: appSettings.microphoneDevice !== 'default' ? { exact: appSettings.microphoneDevice } : undefined,
+        channelCount: 1,
+        sampleRate: 16000,
+        echoCancellation: false,
+        noiseSuppression: false,
+      }
+    };
+    mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (err) {
+    toast('Microphone access denied: check Windows Settings');
+    $('#trChip').className = 'chip err';
+    $('#trChip').textContent = 'Microphone permission denied';
+    return;
+  }
+
+  isRecording = true;
+  recordedPcm = [];
+  playBeep(600, 0.12);
+
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)({ credentials: 'omit', sampleRate: 16000 });
+  audioInputNode = audioCtx.createMediaStreamSource(mediaStream);
+  
+  // Analyser node for live volume meter
+  const analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  audioInputNode.connect(analyser);
+
+  // Buffer collection
+  const bufferSize = 4096;
+  scriptProcessor = audioCtx.createScriptProcessor(bufferSize, 1, 1);
+  scriptProcessor.onaudioprocess = (e) => {
+    if (!isRecording) return;
+    const channelData = e.inputBuffer.getChannelData(0);
+    recordedPcm.push(new Float32Array(channelData));
+  };
+  audioInputNode.connect(scriptProcessor);
+  scriptProcessor.connect(audioCtx.destination);
+
+  // UI updates
+  $('#rec').classList.add('rec-active');
+  $('#rec').textContent = '■ Stop Recording';
+  $('#recLiveArea').style.display = 'block';
+  $('#trStageText').textContent = 'Recording microphone...';
+
+  // Inform main process overlay & tray
+  window.verbumApi?.updateTrayRecording(true);
+  window.verbumApi?.updateOverlay('rec', '● Recording 00:00');
+
+  recordingStartTime = Date.now();
+  const maxSec = (appSettings.maxRecordingLengthSec || 600);
+
+  recordingTimerInterval = setInterval(() => {
+    const elapsedSec = Math.floor((Date.now() - recordingStartTime) / 1000);
+    const mm = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
+    const ss = String(elapsedSec % 60).padStart(2, '0');
+    const timeStr = `${mm}:${ss}`;
+    $('#recTimer').textContent = timeStr;
+    window.verbumApi?.updateOverlay('rec', `● Recording ${timeStr}`);
+
+    if (elapsedSec >= maxSec * 0.9 && elapsedSec < maxSec) {
+      $('#recTimer').style.color = 'var(--warn)';
+    }
+    if (elapsedSec >= maxSec) {
+      stopRecording(source);
+    }
+  }, 1000);
+
+  const pcmData = new Uint8Array(analyser.frequencyBinCount);
+  levelMeterInterval = setInterval(() => {
+    analyser.getByteFrequencyData(pcmData);
+    let sum = 0;
+    for (let i = 0; i < pcmData.length; i++) sum += pcmData[i];
+    const avg = sum / pcmData.length;
+    const pct = Math.min(100, Math.round((avg / 128) * 100));
+    $('#recLevelBar').style.width = pct + '%';
+  }, 60);
+}
+
+async function stopRecording(source = 'button') {
+  if (!isRecording) return;
+  isRecording = false;
+  playBeep(400, 0.12);
+
+  clearInterval(recordingTimerInterval);
+  clearInterval(levelMeterInterval);
+  $('#recLevelBar').style.width = '0';
+  $('#recTimer').style.color = '';
+  $('#rec').classList.remove('rec-active');
+  $('#rec').textContent = '● Record';
+  $('#recLiveArea').style.display = 'none';
+
+  window.verbumApi?.updateTrayRecording(false);
+
+  // Stop Web Audio tracks
+  if (scriptProcessor) { scriptProcessor.disconnect(); scriptProcessor = null; }
+  if (audioInputNode) { audioInputNode.disconnect(); audioInputNode = null; }
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+
+  // Flatten PCM
+  let totalLength = 0;
+  for (const chunk of recordedPcm) totalLength += chunk.length;
+  const merged = new Float32Array(totalLength);
+  let offset = 0;
+  for (const chunk of recordedPcm) {
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  if (merged.length < 1600) {
+    toast('Audio too short (under 0.1s)');
+    window.verbumApi?.hideOverlay();
+    return;
+  }
+
+  const wavBlob = encodeWavBlob(merged, 16000);
+  await submitAudioBlob(wavBlob, 'recording.wav', source);
+}
+
+// ---------------------------------------------------------------------------
+// Transcription Job Submission & SSE Progress
+// ---------------------------------------------------------------------------
+async function submitAudioBlob(blob, filename, source = 'record') {
+  const model = $('#trModel').value;
+  const chip = $('#trChip');
+  const bar = $('#trBar');
+  const cancelBtn = $('#trCancel');
+
+  chip.className = 'chip load';
+  chip.textContent = 'Submitting audio…';
+  cancelBtn.disabled = false;
+  bar.style.width = '2%';
+  // Track this job
+  let jobId = 'job_' + Date.now();
+  activeJobId = jobId;
+  let jobCompleted = false;
+
+  window.verbumApi?.updateOverlay('spin', 'Transcribing…', 0, jobId);
+
+  const formData = new FormData();
+  formData.append('file', blob, filename);
+  formData.append('model', model);
+  formData.append('vad', appSettings.vad ? 'true' : 'false');
+  if (appSettings.language && appSettings.language !== 'auto') {
+    formData.append('language', appSettings.language);
+  }
+  if (appSettings.prompt) {
+    formData.append('prompt', appSettings.prompt);
+  }
+
+  try {
+    const res = await apiFetch('/transcribe', {
+      method: 'POST',
+      body: formData,
+    });
+    if (res.status === 409) {
+      jobCompleted = true;
+      toast('Service busy: still transcribing previous audio');
+      window.verbumApi?.updateOverlay('warn', 'Busy: previous audio running', 2500, jobId);
+      chip.className = 'chip err';
+      chip.textContent = 'busy';
+      cancelBtn.disabled = true;
+      bar.style.width = '0';
+      return;
+    }
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail?.message || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    jobId = data.job_id;
+    activeJobId = jobId;
+
+    // Stream SSE events via fetch stream reader
+    const streamRes = await apiFetch(`/events/${jobId}`);
+    const reader = streamRes.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // keep remainder
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const ev = JSON.parse(line.slice(6));
+            const isTerminal = handleJobEvent(ev, source, jobId);
+            if (isTerminal) {
+              jobCompleted = true;
+            }
+          } catch (e) {
+            console.error('Failed to parse SSE event:', e);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    jobCompleted = true;
+    chip.className = 'chip err';
+    chip.textContent = 'Failed';
+    $('#trStageText').textContent = err.message;
+    toast('Transcription failed: ' + err.message);
+    window.verbumApi?.updateOverlay('warn', 'Failed: ' + err.message, 3000, jobId);
+    cancelBtn.disabled = true;
+  } finally {
+    cancelBtn.disabled = true;
+    if (activeJobId === jobId) {
+      activeJobId = null;
+    }
+    if (!jobCompleted) {
+      window.verbumApi?.hideOverlay(jobId);
+    }
+  }
+}
+
+function handleJobEvent(ev, source, currentJobId) {
+  // Ignore events from older or mismatched jobs
+  if (ev.job_id && currentJobId && ev.job_id !== currentJobId) {
+    return false;
+  }
+
+  const chip = $('#trChip');
+  const bar = $('#trBar');
+  const stage = $('#trStageText');
+
+  switch (ev.event) {
+    case 'queued':
+      chip.textContent = 'queued…';
+      stage.textContent = 'Queued in background…';
+      return false;
+
+    case 'loading_model':
+      chip.textContent = `loading ${ev.model || ''}…`;
+      stage.textContent = `Loading Whisper model (${ev.model}) into VRAM…`;
+      return false;
+
+    case 'decoding_audio':
+      chip.textContent = 'decoding…';
+      stage.textContent = 'Preparing audio waveform…';
+      return false;
+
+    case 'transcribing':
+      chip.textContent = 'transcribing…';
+      const pct = ev.percent || 0;
+      bar.style.width = Math.max(5, pct) + '%';
+      stage.textContent = `Transcribing audio (${pct.toFixed(0)}%)…`;
+      return false;
+
+    case 'cancelled':
+      chip.className = 'chip';
+      chip.textContent = 'cancelled';
+      stage.textContent = 'Transcription was cancelled.';
+      bar.style.width = '0';
+      $('#trCancel').disabled = true;
+      activeJobId = null;
+      toast('Transcription cancelled');
+      window.verbumApi?.hideOverlay(currentJobId);
+      return true;
+
+    case 'error':
+      chip.className = 'chip err';
+      chip.textContent = 'error: ' + (ev.code || 'failed');
+      stage.textContent = ev.message || 'Error occurred';
+      bar.style.width = '0';
+      $('#trCancel').disabled = true;
+      activeJobId = null;
+      toast('Error: ' + ev.message);
+      window.verbumApi?.updateOverlay('warn', 'Error: ' + ev.message, 3000, currentJobId);
+      return true;
+
+    case 'done':
+      bar.style.width = '100%';
+      setTimeout(() => bar.style.width = '0', 600);
+      $('#trCancel').disabled = true;
+      activeJobId = null;
+      chip.className = 'chip ready';
+      chip.textContent = 'ready';
+      stage.textContent = 'Transcription complete.';
+
+      const result = ev.result || {};
+      const transcriptText = (result.text || '').trim();
+      const trOut = $('#trOut');
+
+      if (result.no_speech || !transcriptText) {
+        trOut.className = 'out empty';
+        trOut.textContent = '[No speech detected]';
+        $('#trCopy').disabled = true;
+        $('#trSend').disabled = true;
+        $('#trPerfInfo').textContent = `${result.duration_s || 0}s audio · 0 words`;
+        window.verbumApi?.updateOverlay('ok', 'No speech detected', 2000, currentJobId);
+        return true;
+      }
+
+      trOut.className = 'out';
+      trOut.textContent = transcriptText;
+      $('#trCopy').disabled = false;
+      $('#trSend').disabled = false;
+      $('#trPerfInfo').textContent = `${result.duration_s}s audio transcribed in ${result.elapsed_s}s (${result.device} ${result.compute_type})`;
+
+      // Automatic clipboard copy (respects copyAutomatically setting)
+      const shouldCopy = appSettings.copyAutomatically !== false;
+      if (shouldCopy) {
+        try {
+          if (navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(transcriptText).catch(() => {});
+          }
+          window.verbumApi?.copyToClipboard(transcriptText);
+          $('#trAutoCopyNotice').style.display = 'inline';
+          setTimeout(() => $('#trAutoCopyNotice').style.display = 'none', 3000);
+          toast('Copied to clipboard');
+        } catch (e) {
+          console.error('Clipboard copy failed:', e);
+        }
+      }
+
+      // Auto-paste if toggle is enabled
+      if (appSettings.autoPaste) {
+        try {
+          window.verbumApi?.triggerAutoPaste(transcriptText);
+        } catch (e) {
+          console.error('Auto paste failed:', e);
+        }
+      }
+
+      // Hotkey/Tray overlay feedback: brief "Copied ✓" then hides
+      if (shouldCopy) {
+        window.verbumApi?.updateOverlay('ok', 'Copied to clipboard ✓', 2500, currentJobId);
+      } else {
+        window.verbumApi?.updateOverlay('ok', 'Transcription complete ✓', 2500, currentJobId);
+      }
+
+      return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Cancel & File Upload Handlers
+// ---------------------------------------------------------------------------
+$('#trCancel').onclick = async () => {
+  if (activeJobId) {
+    try {
+      await apiFetch(`/cancel/${activeJobId}`, { method: 'POST' });
+    } catch (e) {}
+  }
+};
+
+$('#rec').onclick = () => {
+  if (!isRecording) startRecording('button');
+  else stopRecording('button');
+};
+$('#recStopBtn').onclick = () => stopRecording('button');
+
+// File Upload
+const trFileInput = $('#trFileInput');
+$('#trUp').onclick = () => trFileInput.click();
+$('#trDropZone').onclick = () => trFileInput.click();
+
+trFileInput.onchange = (e) => {
+  const file = e.target.files[0];
+  if (file) handleChosenAudioFile(file);
+};
+
+['dragover', 'dragleave', 'drop'].forEach(ev => {
+  $('#trDropZone').addEventListener(ev, (e) => {
+    e.preventDefault();
+    $('#trDropZone').classList.toggle('over', ev === 'dragover');
+    if (ev === 'drop' && e.dataTransfer.files[0]) {
+      handleChosenAudioFile(e.dataTransfer.files[0]);
+    }
+  });
+});
+
+async function handleChosenAudioFile(file) {
+  // Only accept uploads while main window is open
+  const isVisible = await window.verbumApi?.isWindowVisible();
+  if (isVisible === false) {
+    toast('Uploads accepted only in open window');
+    return;
+  }
+
+  $('#trDropText').textContent = `📎 ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+  await submitAudioBlob(file, file.name, 'upload');
+}
+
+$('#trCopy').onclick = async () => {
+  const text = $('#trOut').textContent.trim();
+  if (text) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      }
+    } catch (e) {}
+    window.verbumApi?.copyToClipboard(text);
+    const btn = $('#trCopy');
+    const origText = btn.textContent;
+    btn.textContent = 'Copied ✓';
+    toast('Copied to clipboard');
+    setTimeout(() => {
+      btn.textContent = origText || 'Copy';
+    }, 1500);
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Step D: Send to Editor with Approval Queue
+// ---------------------------------------------------------------------------
+function addToPendingList(item) {
+  item.id = 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4);
+  pendingItems.push(item);
+  saveAndRenderPending();
+}
+
+function saveAndRenderPending() {
+  window.verbumApi?.savePendingList(pendingItems);
+  const container = $('#pendingList');
+  const countSpan = $('#pendingCount');
+  const edBadge = $('#edBadge');
+  const clearBtn = $('#pendingClearAll');
+
+  countSpan.textContent = pendingItems.length;
+  if (pendingItems.length > 0) {
+    edBadge.textContent = pendingItems.length;
+    edBadge.hidden = false;
+    clearBtn.style.display = 'block';
+  } else {
+    edBadge.hidden = true;
+    clearBtn.style.display = 'none';
+  }
+
+  if (pendingItems.length === 0) {
+    container.innerHTML = '<div class="empty" style="font-size:13px">No pending transcripts.</div>';
+    return;
+  }
+
+  container.innerHTML = '';
+  pendingItems.forEach((item, index) => {
+    const div = document.createElement('div');
+    div.className = 'pending-item';
+    div.innerHTML = `
+      <div class="p-meta">
+        <span>${item.source.toUpperCase()} · ${item.model}</span>
+        <span>${item.timestamp}</span>
+      </div>
+      <div class="p-text" id="p_text_${item.id}">${item.text}</div>
+      <textarea class="p-edit" id="p_edit_${item.id}">${item.text}</textarea>
+      <div class="p-actions">
+        <button class="btn p" data-action="approve" data-id="${item.id}">✓ Approve</button>
+        <button class="btn" data-action="edit" data-id="${item.id}">✎ Edit</button>
+        <button class="btn danger" data-action="reject" data-id="${item.id}">✕ Reject</button>
+      </div>
+    `;
+
+    // Action buttons
+    div.querySelector('[data-action="approve"]').onclick = () => approvePendingItem(item.id);
+    div.querySelector('[data-action="reject"]').onclick = () => rejectPendingItem(item.id);
+    
+    const editBtn = div.querySelector('[data-action="edit"]');
+    editBtn.onclick = () => {
+      const textView = div.querySelector(`#p_text_${item.id}`);
+      const textEdit = div.querySelector(`#p_edit_${item.id}`);
+      if (textEdit.style.display === 'block') {
+        // Save edit
+        item.text = textEdit.value;
+        textView.textContent = item.text;
+        textEdit.style.display = 'none';
+        textView.style.display = 'block';
+        editBtn.textContent = '✎ Edit';
+        window.verbumApi?.savePendingList(pendingItems);
+      } else {
+        textEdit.style.display = 'block';
+        textView.style.display = 'none';
+        editBtn.textContent = '💾 Save';
+      }
+    };
+
+    container.appendChild(div);
+  });
+}
+
+function approvePendingItem(id) {
+  const idx = pendingItems.findIndex(x => x.id === id);
+  if (idx === -1) return;
+  const item = pendingItems[idx];
+  insertIntoDocument(item.text);
+  pendingItems.splice(idx, 1);
+  saveAndRenderPending();
+  toast('Approved & inserted into document');
+}
+
+function rejectPendingItem(id) {
+  pendingItems = pendingItems.filter(x => x.id !== id);
+  saveAndRenderPending();
+  toast('Rejected transcript');
+}
+
+function insertIntoDocument(text) {
+  const p = $('#page');
+  const ink = $('#ink');
+  const para = document.createElement('p');
+  para.textContent = text;
+  p.insertBefore(para, ink);
+  $('#edState').textContent = 'modified';
+}
+
+$('#pendingApproveAll').onclick = () => {
+  if (pendingItems.length === 0) return;
+  pendingItems.forEach(item => insertIntoDocument(item.text));
+  const count = pendingItems.length;
+  pendingItems = [];
+  saveAndRenderPending();
+  toast(`Approved all ${count} transcripts`);
+};
+
+$('#pendingClearAll').onclick = () => {
+  pendingItems = [];
+  saveAndRenderPending();
+  toast('Cleared pending transcripts');
+};
+
+$('#trSend').onclick = () => {
+  const text = $('#trOut').textContent.trim();
+  if (!text) return;
+  addToPendingList({
+    text: text,
+    source: 'transcribe',
+    model: $('#trModel').value,
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  });
+  show('ed');
+  toast('Sent to Editor waiting list');
+};
+
+// ---------------------------------------------------------------------------
+// Step C: Model Switching & Explicit Download
+// ---------------------------------------------------------------------------
+let previousModel = 'small';
+
+$('#trModel').onchange = async (e) => {
+  const selected = e.target.value;
+  await switchModel(selected);
+};
+
+async function switchModel(name) {
+  const chip = $('#trChip');
+  chip.className = 'chip load';
+  chip.textContent = `model: loading ${name}…`;
+  $('#rec').disabled = true;
+  $('#trUp').disabled = true;
+
+  try {
+    const res = await apiFetch('/model/select', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+
+    if (res.status === 404) {
+      // Model not downloaded: prompt user explicitly (Requirement 2.3)
+      chip.className = 'chip';
+      chip.textContent = 'model: needs download';
+      $('#rec').disabled = false;
+      $('#trUp').disabled = false;
+      promptDownloadModel(name);
+      return;
+    }
+
+    if (!res.ok) {
+      throw new Error((await res.json()).detail?.message || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    previousModel = name;
+    chip.className = 'chip ready';
+    chip.textContent = `model: ready (${data.device})`;
+    $('#rec').disabled = false;
+    $('#trUp').disabled = false;
+    window.verbumApi?.updateTrayModel(name);
+  } catch (err) {
+    chip.className = 'chip err';
+    chip.textContent = 'model: error';
+    toast(`Failed to load ${name}: ${err.message}`);
+    $('#trModel').value = previousModel;
+    $('#rec').disabled = false;
+    $('#trUp').disabled = false;
+  }
+}
+
+function promptDownloadModel(name) {
+  const approxSizes = { tiny: '75 MB', base: '145 MB', small: '480 MB', medium: '1.5 GB' };
+  $('#dlTitle').textContent = `Download Whisper Model (${name})`;
+  $('#dlDesc').textContent = `Model '${name}' is not stored on this device. Would you like to download it now (~${approxSizes[name] || 'unknown'})? Models are stored locally in %APPDATA%\\Verbum\\models.`;
+  $('#dlBar').style.width = '0';
+  $('#dlModal').classList.add('on');
+
+  $('#dlCancelBtn').onclick = () => {
+    $('#dlModal').classList.remove('on');
+    $('#trModel').value = previousModel;
+    switchModel(previousModel);
+  };
+
+  $('#dlConfirmBtn').onclick = async () => {
+    $('#dlConfirmBtn').disabled = true;
+    $('#dlCancelBtn').disabled = true;
+    const bar = $('#dlBar');
+    bar.style.width = '5%';
+
+    try {
+      const res = await apiFetch('/model/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = JSON.parse(line.slice(6));
+            if (data.percent) {
+              bar.style.width = data.percent + '%';
+            }
+            if (data.done) {
+              $('#dlModal').classList.remove('on');
+              $('#dlConfirmBtn').disabled = false;
+              $('#dlCancelBtn').disabled = false;
+              toast(`Downloaded ${name} successfully!`);
+              switchModel(name);
+              return;
+            }
+            if (data.error) {
+              throw new Error(data.error);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      toast('Download failed: ' + err.message);
+      $('#dlModal').classList.remove('on');
+      $('#dlConfirmBtn').disabled = false;
+      $('#dlCancelBtn').disabled = false;
+      $('#trModel').value = previousModel;
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Section 9: Settings Screen Wiring
+// ---------------------------------------------------------------------------
+async function loadAndBindSettings() {
+  if (!window.verbumApi) return;
+  appSettings = await window.verbumApi.getSettings();
+
+  $('#stDefaultModel').value = appSettings.defaultModel || 'small';
+  $('#stLanguage').value = appSettings.language || 'auto';
+  $('#stVad').checked = !!appSettings.vad;
+  $('#stPrompt').value = appSettings.prompt || '';
+  $('#stMaxLen').value = Math.floor((appSettings.maxRecordingLengthSec || 600) / 60);
+  $('#stLoadAtStartup').checked = !!appSettings.loadModelAtStartup;
+  $('#stPlaySound').checked = !!appSettings.playSound;
+  $('#stDeleteTempAudio').checked = !!appSettings.deleteTempAudio;
+  $('#stCopyAuto').checked = !!appSettings.copyAutomatically;
+  $('#stAutoPaste').checked = !!appSettings.autoPaste;
+  $('#stKeepTray').checked = !!appSettings.keepInTrayOnClose;
+  $('#stHotkey').value = appSettings.recordingHotkey || 'CommandOrControl+Space';
+
+  // Bind settings change listeners
+  const save = () => {
+    appSettings = {
+      defaultModel: $('#stDefaultModel').value,
+      language: $('#stLanguage').value,
+      vad: $('#stVad').checked,
+      prompt: $('#stPrompt').value,
+      maxRecordingLengthSec: parseInt($('#stMaxLen').value, 10) * 60,
+      loadModelAtStartup: $('#stLoadAtStartup').checked,
+      playSound: $('#stPlaySound').checked,
+      deleteTempAudio: $('#stDeleteTempAudio').checked,
+      copyAutomatically: $('#stCopyAuto').checked,
+      autoPaste: $('#stAutoPaste').checked,
+      keepInTrayOnClose: $('#stKeepTray').checked,
+      recordingHotkey: $('#stHotkey').value,
+      microphoneDevice: $('#stMic').value,
+    };
+    window.verbumApi.saveSettings(appSettings);
+  };
+
+  ['stDefaultModel', 'stLanguage', 'stVad', 'stPrompt', 'stMaxLen', 'stLoadAtStartup', 'stPlaySound', 'stDeleteTempAudio', 'stCopyAuto', 'stAutoPaste', 'stKeepTray', 'stMic'].forEach(id => {
+    $(`#${id}`).addEventListener('change', save);
+  });
+
+  // Populate microphone devices
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const micSelect = $('#stMic');
+    micSelect.innerHTML = '<option value="default">Default Device</option>';
+    devices.filter(d => d.kind === 'audioinput').forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d.deviceId;
+      opt.textContent = d.label || `Microphone ${micSelect.children.length}`;
+      micSelect.appendChild(opt);
+    });
+    if (appSettings.microphoneDevice) {
+      micSelect.value = appSettings.microphoneDevice;
+    }
+  } catch (e) {}
+
+  // Hotkey rebind
+  $('#stRebindBtn').onclick = () => {
+    const btn = $('#stRebindBtn');
+    btn.textContent = 'Press shortcut…';
+    btn.classList.add('p');
+
+    const keyHandler = (e) => {
+      e.preventDefault();
+      if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+
+      const parts = [];
+      if (e.ctrlKey) parts.push('CommandOrControl');
+      if (e.altKey) parts.push('Alt');
+      if (e.shiftKey) parts.push('Shift');
+      const keyName = e.key === ' ' ? 'Space' : e.key.toUpperCase();
+      parts.push(keyName);
+
+      const combo = parts.join('+');
+      window.removeEventListener('keydown', keyHandler);
+      btn.textContent = 'Change Shortcut';
+      btn.classList.remove('p');
+
+      window.verbumApi.rebindHotkey(combo).then(res => {
+        if (res.success) {
+          $('#stHotkey').value = combo;
+          appSettings.recordingHotkey = combo;
+          toast('Shortcut updated: ' + combo);
+        } else {
+          toast('Shortcut unavailable: ' + res.error);
+        }
+      });
+    };
+    window.addEventListener('keydown', keyHandler);
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Global Hotkey / Tray Recording Event Listener
+// ---------------------------------------------------------------------------
+if (window.verbumApi) {
+  window.verbumApi.onGlobalRecordToggle(({ source }) => {
+    if (!isRecording) {
+      startRecording(source || 'hotkey');
+    } else {
+      stopRecording(source || 'hotkey');
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Initialization
+// ---------------------------------------------------------------------------
+async function initApp() {
+  if (window.verbumApi) {
+    backendInfo = await window.verbumApi.getBackendInfo();
+    pendingItems = await window.verbumApi.getPendingList();
+    saveAndRenderPending();
+    await loadAndBindSettings();
+
+    // Check health & model readiness
+    try {
+      const res = await apiFetch('/health');
+      if (res.ok) {
+        const data = await res.json();
+        installedModels = data.models_installed || [];
+        const modelToLoad = appSettings.defaultModel || 'small';
+        $('#trModel').value = modelToLoad;
+        await switchModel(modelToLoad);
+      }
+    } catch (e) {
+      console.warn('Backend connecting...', e);
+    }
+  }
+}
+
+initApp();
+
+// ---------------------------------------------------------------------------
+// Preserved Prototype Functionality (Extract, Font, Editor Canvas)
+// ---------------------------------------------------------------------------
+let job=null;
+function run({bar,chip,cancel,fail,done,label}){
+  if(job)return;let p=0;chip.className='chip load';chip.textContent=label+': loading…';cancel.disabled=false;bar.style.width='5%';
+  job=setInterval(()=>{p+=8+Math.random()*10;bar.style.width=Math.min(p,100)+'%';
+    if(p>35)chip.textContent=label+': running…';
+    if(p>=100){end();chip.className='chip ready';chip.textContent=label+': ready';fail?fail():done()}},260);
+  function end(){clearInterval(job);job=null;cancel.disabled=true;setTimeout(()=>bar.style.width='0',600)}
+  cancel.onclick=()=>{end();bar.style.width='0';chip.className='chip';chip.textContent=label+': unloaded';toast('Cancelled')};
+}
+
+// Extract
+const drop=$('#drop');
+if(drop){
+  drop.onclick=()=>toast('File picker opens here (mock)');
+  drop.onkeydown=e=>{if(e.key==='Enter'||e.key===' ')drop.click()};
+  ['dragover','dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.toggle('over',ev==='dragover');if(ev==='drop'){drop.textContent='📎 '+(e.dataTransfer.files[0]?.name||'file')}}));
+  $('#exRun').onclick=()=>run({bar:$('#exBar'),chip:$('#exChip'),cancel:$('#exCancel'),label:'engine',fail:null,done:()=>{
+    const r=$('#exRaw'),f=$('#exFix');r.className=f.className='out';
+    r.textContent='Meet me at the cafe wh?t time works for you? I will bring the notes frorn class.';
+    f.innerHTML='Meet me at the cafe <span class="low" title="Unclear \'a\' · 91% · alternatives: what, wheat">what</span> time works for you? I will bring the notes <span class="low" title="\'rn\' read as \'m\' · 84% · alternatives: from, frorn">from</span> class.';
+    $('#exSend').disabled=false}});
+  $('#exSend').onclick=()=>{addToPendingList({text:$('#exFix').textContent,source:'extract',model:'OCR',timestamp:new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})});show('ed');toast('Sent to Editor waiting list')};
+}
+
+// Font
+const L='A B C D E F G H I J K a b c d e f g h ! ? .'.split(' ');let sel=null;
+if($('#ftLoad')){
+  $('#ftLoad').onclick=()=>{const g=$('#glyphs');g.innerHTML='';L.forEach((c,i)=>{const d=document.createElement('div');d.className='g';d.dataset.s=i%7==3?'flag':i==11?'miss':'ok';d.tabIndex=0;
+    d.innerHTML='<b>'+c+'</b><small></small>';d.onclick=()=>{sel=d;$$('.g').forEach(x=>x.classList.remove('sel'));d.classList.add('sel');$('#ftAct').hidden=false;$('#ftSel').textContent='Glyph “'+c+'”'};d.onkeydown=e=>{if(e.key==='Enter')d.click()};g.append(d);lab(d)});
+    $('#ftGen').disabled=false;cnt()};
+  function lab(d){d.querySelector('small').textContent={ok:'✓ approved',flag:'⚑ review',miss:'╌ missing'}[d.dataset.s]}
+  function cnt(){const n=$$('.g[data-s=miss]').length,f=$$('.g[data-s=flag]').length;$('#ftCount').textContent=$$('.g').length+' glyphs · '+f+' to review · '+n+' missing'}
+  $$('#ftAct [data-a]').forEach(b=>b.onclick=()=>{if(!sel)return;sel.dataset.s=b.dataset.a;lab(sel);cnt()});
+  $('#ftGen').onclick=()=>{const f=$$('.g[data-s=flag]').length;$('#ftMsg').textContent=f?f+' glyph(s) still need review — approve them first.':'Mock font generated: MyHand-Test.ttf'};
+}
+
+// Editor
+const page=$('#page');
+if(page){
+  $$('.tb [data-c]').forEach(b=>b.onmousedown=e=>{e.preventDefault();document.execCommand(b.dataset.c)});
+  $('#edFont').onchange=e=>page.style.fontFamily=e.target.value;$('#edSize').onchange=e=>page.style.fontSize=e.target.value+'px';
+  page.addEventListener('input',()=>$('#edState').textContent='modified');
+  $$('[data-x]').forEach(b=>b.onclick=()=>{$('#edState').textContent='saved';toast(b.dataset.x+' export (mock)')});
+  const cv=$('#ink'),cx=cv.getContext('2d');let tool=null,drawing=false,last;
+  function fit(){const r=page.getBoundingClientRect();cv.width=r.width;cv.height=page.scrollHeight}new ResizeObserver(fit).observe(page);
+  function pick(t){tool=tool===t?null:t;$('#penBtn').setAttribute('aria-pressed',tool==='pen');$('#pencilBtn').setAttribute('aria-pressed',tool==='pencil');cv.classList.toggle('on',!!tool)}
+  $('#penBtn').onclick=()=>pick('pen');$('#pencilBtn').onclick=()=>pick('pencil');
+  $('#clearInk').onclick=()=>cx.clearRect(0,0,cv.width,cv.height);
+  function xy(e){const r=cv.getBoundingClientRect();return[e.clientX-r.left,e.clientY-r.top,e.pressure||.5]}
+  cv.onpointerdown=e=>{drawing=true;last=xy(e);cv.setPointerCapture(e.pointerId)};
+  cv.onpointerup=()=>drawing=false;
+  cv.onpointermove=e=>{if(!drawing)return;const p=xy(e);cx.strokeStyle=$('#inkColor').value;cx.lineCap=cx.lineJoin='round';
+    if(tool==='pen'){cx.globalAlpha=1;cx.lineWidth=1.6+p[2]*1.2;cx.beginPath();cx.moveTo(last[0],last[1]);cx.lineTo(p[0],p[1]);cx.stroke()}
+    else{cx.lineWidth=1.2;const n=6,dx=p[0]-last[0],dy=p[1]-last[1],d=Math.hypot(dx,dy)|0;
+      for(let i=0;i<=d;i+=2)for(let k=0;k<n;k++){cx.globalAlpha=.12+.25*p[2]*Math.random();const a=Math.random()*6.28,r=Math.random()*3;
+        cx.fillStyle=cx.strokeStyle;cx.fillRect(last[0]+dx*i/(d||1)+Math.cos(a)*r,last[1]+dy*i/(d||1)+Math.sin(a)*r,1.2,1.2)}}
+    last=p;$('#edState').textContent='modified'};
+}
+</script>
+</body>
+</html>

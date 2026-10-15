@@ -1,0 +1,37 @@
+{
+  "name": "verbum",
+  "version": "1.0.0",
+  "description": "Verbum - Local Speech-to-Text Transcription & Handwriting Editor",
+  "main": "app/main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "keywords": [
+    "transcription",
+    "whisper",
+    "speech-to-text",
+    "editor"
+  ],
+  "author": "Verbum Team",
+  "license": "MIT",
+  "build": {
+    "appId": "com.verbum.app",
+    "productName": "Verbum",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "files": [
+      "app/**/*",
+      "package.json"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^44.7.2",
+    "electron-builder": "^26.15.3"
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "tiny": {
+    "device": "cuda",
+    "compute_type": "float16",
+    "load_time_s": 0.3,
+    "vram_delta_mb": 155.0,
+    "ram_delta_mb": 162.7,
+    "short_duration_s": 4.19,
+    "short_latency_s": 0.693,
+    "short_rtf": 0.165,
+    "long_duration_s": 14.54,
+    "long_latency_s": 0.38,
+    "long_rtf": 0.026,
+    "short_text": "Hello, this is a test of the verbum transcription engine.",
+    "vram_reclaimed": 86.0
+  },
+  "base": {
+    "device": "cuda",
+    "compute_type": "float16",
+    "load_time_s": 0.4,
+    "vram_delta_mb": 152.0,
+    "ram_delta_mb": 16.1,
+    "short_duration_s": 4.19,
+    "short_latency_s": 0.266,
+    "short_rtf": 0.063,
+    "long_duration_s": 14.54,
+    "long_latency_s": 0.55,
+    "long_rtf": 0.038,
+    "short_text": "Hello, this is a test of the verbom transcription engine.",
+    "vram_reclaimed": 147.0
+  },
+  "small": {
+    "device": "cuda",
+    "compute_type": "float16",
+    "load_time_s": 0.83,
+    "vram_delta_mb": 589.0,
+    "ram_delta_mb": 6.9,
+    "short_duration_s": 4.19,
+    "short_latency_s": 0.413,
+    "short_rtf": 0.099,
+    "long_duration_s": 14.54,
+    "long_latency_s": 0.677,
+    "long_rtf": 0.047,
+    "short_text": "Hello, this is a test of the verbom transcription engine.",
+    "vram_reclaimed": 572.0
+  },
+  "medium": {
+    "device": "cuda",
+    "compute_type": "int8_float16",
+    "load_time_s": 4.5,
+    "vram_delta_mb": 971.0,
+    "ram_delta_mb": 7.0,
+    "short_duration_s": 4.19,
+    "short_latency_s": 0.913,
+    "short_rtf": 0.218,
+    "long_duration_s": 14.54,
+    "long_latency_s": 1.806,
+    "long_rtf": 0.124,
+    "short_text": "Hello, this is a test of the Verbum transcription engine.",
+    "vram_reclaimed": 952.0
+  }
+}
